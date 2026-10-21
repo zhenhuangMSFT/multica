@@ -1829,6 +1829,19 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		SuppressedAgentIds: suppressAgentIDs,
 	}
 	var created db.CreateCommentRow
+	var readInboxIDs []pgtype.UUID
+	createComment := func(q *db.Queries) (db.CreateCommentRow, error) {
+		row, err := q.CreateComment(r.Context(), createParams)
+		if err == nil && authorType == "member" {
+			readInboxIDs, err = q.MarkInboxReadByIssue(r.Context(), db.MarkInboxReadByIssueParams{
+				WorkspaceID: issue.WorkspaceID,
+				RecipientID: createParams.AuthorID,
+				IssueID:     issue.ID,
+				ThroughAt:   row.CreatedAt,
+			})
+		}
+		return row, err
+	}
 	var err error
 	if len(attachmentIDs) > 0 {
 		// A comment and the attachments it was posted with are one visible
@@ -1857,7 +1870,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
-		created, err = qtx.CreateComment(r.Context(), createParams)
+		created, err = createComment(qtx)
 		if err == nil {
 			var missing pgtype.UUID
 			missing, err = lockCommentAttachments(r.Context(), qtx, issue.WorkspaceID, issue.ID, attachmentIDs)
@@ -1877,9 +1890,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 			err = tx.Commit(r.Context())
 		}
 	} else {
-		created, err = wakeupWrite(h, r, func(q *db.Queries) (db.CreateCommentRow, error) {
-			return q.CreateComment(r.Context(), createParams)
-		})
+		created, err = wakeupWrite(h, r, createComment)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The issue was deleted, possibly while this waited for its row lock.
@@ -1892,6 +1903,13 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	comment := created.Comment()
+
+	for _, id := range readInboxIDs {
+		h.publish(protocol.EventInboxRead, uuidToString(issue.WorkspaceID), authorType, authorID, map[string]any{
+			"item_id":      uuidToString(id),
+			"recipient_id": authorID,
+		})
+	}
 
 	// Fetch linked attachments so the response includes them.
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
