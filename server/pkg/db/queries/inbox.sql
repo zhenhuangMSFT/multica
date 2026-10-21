@@ -121,6 +121,20 @@ UPDATE inbox_item SET read = false
 WHERE id = $1
 RETURNING *;
 
+-- name: MarkInboxReadByIssue :many
+-- A member's successful response handles their existing active notifications
+-- for this issue. Keep newer notifications unread, including replies arriving
+-- while the comment transaction waits for its issue lock.
+UPDATE inbox_item SET read = true
+WHERE workspace_id = @workspace_id
+  AND recipient_type = 'member'
+  AND recipient_id = @recipient_id
+  AND issue_id = @issue_id
+  AND read = false
+  AND archived = false
+  AND created_at <= @through_at::timestamptz
+RETURNING id;
+
 -- name: ArchiveInboxItem :one
 UPDATE inbox_item SET archived = true
 WHERE id = $1

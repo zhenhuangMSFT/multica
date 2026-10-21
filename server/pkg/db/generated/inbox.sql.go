@@ -645,6 +645,53 @@ func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem,
 	return i, err
 }
 
+const markInboxReadByIssue = `-- name: MarkInboxReadByIssue :many
+UPDATE inbox_item SET read = true
+WHERE workspace_id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND issue_id = $3
+  AND read = false
+  AND archived = false
+  AND created_at <= $4::timestamptz
+RETURNING id
+`
+
+type MarkInboxReadByIssueParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RecipientID pgtype.UUID        `json:"recipient_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	ThroughAt   pgtype.Timestamptz `json:"through_at"`
+}
+
+// A member's successful response handles their existing active notifications
+// for this issue. Keep newer notifications unread, including replies arriving
+// while the comment transaction waits for its issue lock.
+func (q *Queries) MarkInboxReadByIssue(ctx context.Context, arg MarkInboxReadByIssueParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, markInboxReadByIssue,
+		arg.WorkspaceID,
+		arg.RecipientID,
+		arg.IssueID,
+		arg.ThroughAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markInboxUnread = `-- name: MarkInboxUnread :one
 UPDATE inbox_item SET read = false
 WHERE id = $1
