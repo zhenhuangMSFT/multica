@@ -1757,10 +1757,10 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 			// The task.IssueID scope is important: the CLI stamps X-Task-ID on
 			// every request, so an agent legitimately commenting on a different
 			// issue must not be blocked by its current task's trigger.
-			// Assignment-triggered tasks (no TriggerCommentID) are also
-			// unaffected.
+			// Assignment-triggered tasks have no TriggerCommentID. Wakeup runs
+			// keep one as context, but select delivery from current comments.
 			if task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
-				if task.TriggerCommentID.Valid {
+				if task.TriggerCommentID.Valid && task.TriggerEvidenceKind.String != "issue_wakeup" {
 					if !taskCoversReplyParent(task, parentID) {
 						// Keep this error actionable for agents (MUL-4417 / GH #5266).
 						// The two rejections need different copy. A resumed

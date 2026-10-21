@@ -300,6 +300,8 @@ export interface TaskCancellationActor {
 
 export interface AgentTask {
   wakeup_id?: string;
+  /** The trigger as it was when this run was queued, not the live rule. */
+  wakeup_snapshot?: import("./issue-wakeup").WakeupPreview & { filter_agent_id?: string | null };
   id: string;
   agent_id: string;
   runtime_id: string;

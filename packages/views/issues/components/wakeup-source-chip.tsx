@@ -3,18 +3,28 @@
 import { useCallback, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Bell } from "lucide-react";
-import { issueTasksOptions, issueWakeupsOptions } from "@multica/core/issues";
-import type { AgentTask, IssueWakeup } from "@multica/core/types";
-import { useWorkspaceId } from "@multica/core/hooks";
+import { issueTasksOptions, issueTimelineOptions } from "@multica/core/issues";
+import type { AgentTask, TimelineEntry } from "@multica/core/types";
+import { useActorName } from "@multica/core/workspace/hooks";
 import { useT } from "../../i18n";
 import { useWakeupText } from "./wakeup-presentation";
+import { wakeupActivityPreview, wakeupSnapshotPreview } from "./wakeup-activity";
 
-/** The wakeup that started a run, when the issue still has it. */
-export function useRunWakeup(issueId: string, wakeupId?: string): IssueWakeup | undefined {
-  const wsId = useWorkspaceId();
-  const select = useCallback((rules: IssueWakeup[]) => rules.find((w) => w.id === wakeupId), [wakeupId]);
-  const { data } = useQuery({ ...issueWakeupsOptions(wsId, issueId), enabled: !!wsId && !!issueId && !!wakeupId, select });
-  return data;
+function useRunWakeupSnapshot(task: AgentTask) {
+  const { getActorName } = useActorName();
+  const select = useCallback(
+    (entries: TimelineEntry[]) => entries.find((entry) =>
+      entry.action === "wakeup_triggered" && entry.details?.task_id === task.id),
+    [task.id],
+  );
+  const { data: entry } = useQuery({
+    ...issueTimelineOptions(task.issue_id),
+    enabled: !!task.issue_id && !!task.wakeup_id && !task.wakeup_snapshot,
+    select,
+  });
+  return task.wakeup_snapshot
+    ? wakeupSnapshotPreview(task.wakeup_snapshot, getActorName)
+    : (entry ? wakeupActivityPreview(entry, getActorName) : undefined);
 }
 
 /**
@@ -22,17 +32,17 @@ export function useRunWakeup(issueId: string, wakeupId?: string): IssueWakeup | 
  * that a wakeup started. Renders nothing for other comments.
  */
 export function WakeupSourceChip({ issueId, taskId }: { issueId: string; taskId: string }) {
-  const select = useCallback((tasks: AgentTask[]) => tasks.find((task) => task.id === taskId)?.wakeup_id, [taskId]);
-  const { data: wakeupId } = useQuery({ ...issueTasksOptions(issueId), select });
-  return wakeupId ? <WakeupSourceChipLabel issueId={issueId} wakeupId={wakeupId} /> : null;
+  const select = useCallback((tasks: AgentTask[]) => tasks.find((task) => task.id === taskId), [taskId]);
+  const { data: task } = useQuery({ ...issueTasksOptions(issueId), select });
+  return task?.wakeup_id ? <WakeupSourceChipLabel task={task} /> : null;
 }
 
-function WakeupSourceChipLabel({ issueId, wakeupId }: { issueId: string; wakeupId: string }) {
+function WakeupSourceChipLabel({ task }: { task: AgentTask }) {
   const { t } = useT("issues");
   const text = useWakeupText();
-  const rule = useRunWakeup(issueId, wakeupId);
-  const label = rule
-    ? t(($) => $.execution_log.trigger_wakeup, { condition: text.trigger(rule) })
+  const snapshot = useRunWakeupSnapshot(task);
+  const label = snapshot
+    ? t(($) => $.execution_log.trigger_wakeup, { condition: text.trigger(snapshot) })
     : t(($) => $.wakeups.triggered_by_wakeup);
   return (
     <span
@@ -46,9 +56,8 @@ function WakeupSourceChipLabel({ issueId, wakeupId }: { issueId: string; wakeupI
 }
 
 /**
- * A wakeup run's trigger label with the rule's condition, e.g. "Wakeup · When
- * a linked PR's CI finishes". Mounted only for wakeup runs, so other run
- * lists never load the issue's rules.
+ * A wakeup run's trigger label uses its immutable snapshot, never the rule's
+ * current schedule. Older runs use their timeline snapshot when available.
  */
 export function WakeupRunLabel({
   task,
@@ -61,6 +70,6 @@ export function WakeupRunLabel({
 }) {
   const { t } = useT("issues");
   const text = useWakeupText();
-  const rule = useRunWakeup(task.issue_id, task.wakeup_id);
-  return render(rule ? t(($) => $.execution_log.trigger_wakeup, { condition: text.trigger(rule) }) : fallback);
+  const snapshot = useRunWakeupSnapshot(task);
+  return render(snapshot ? t(($) => $.execution_log.trigger_wakeup, { condition: text.trigger(snapshot) }) : fallback);
 }

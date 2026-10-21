@@ -78,7 +78,30 @@ on a source lock while holding the issue lock. The server returns the stable
 once after 250ms. Other conflicts and ambiguous network failures are not retried.
 Broad
 agent filters observe future facts, without replaying history or following retry
-chains. `--parent COMMENT` preserves the original result-delivery thread.
+chains. `--parent COMMENT` supplies the original delivery context, not a
+permanent pin to an old message. Continuations read current comments and reply
+to the latest relevant user message or designated progress thread. An explicit
+user-selected thread pin in the wakeup instruction takes precedence; unrelated
+newer messages do not redirect the update.
+
+The comment API recognizes wakeup runs by their server-stored `issue_wakeup`
+trigger evidence and does not enforce the saved parent as a reply target.
+Ordinary comment-triggered runs retain their trigger/coalesced-parent guard,
+and every reply parent must still belong to the target issue. Validate this
+through task-token comment posting, not only prompt text: a prompt-only change
+can still be rejected by the API's reply-parent guard.
+
+Comment and run trigger labels use the rule snapshot persisted with that run,
+so rescheduling or deleting a rule never rewrites historical trigger times,
+including after reload. Current schedule controls and the issue header still
+show the live rule. Older runs use their recorded trigger activity when it has
+a snapshot; otherwise they show a generic wakeup label rather than borrowing a
+later schedule.
+
+`e2e/wakeup-history.spec.ts` exercises scheduler dispatch, genuine claimed-task
+tokens posting to newer threads, repeated rescheduling, and history after reload.
+It uses a fixture runtime, not a real model; prompt tests separately cover current
+context selection and explicit user-selected pins.
 
 `update ISSUE WAKEUP` accepts the complete create configuration, replaces it,
 increments its revision, withdraws old unclaimed inputs, and explicitly enables

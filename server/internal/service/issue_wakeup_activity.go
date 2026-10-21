@@ -39,6 +39,9 @@ func wakeupPreview(w db.IssueWakeup) map[string]any {
 	preview := map[string]any{
 		"id": util.UUIDToString(w.ID), "kind": w.Kind, "mode": w.Mode, "event_types": w.EventTypes,
 		"agent_id": util.UUIDToString(w.AgentID), "timezone": w.Timezone,
+		"issue_id": util.UUIDToString(w.IssueID), "agent_name": "",
+		"filter_task_id": nil, "filter_agent_name": nil,
+		"interval_seconds": nil, "cron_expression": nil, "next_fire_at": nil,
 	}
 	if len(w.Condition) > 0 {
 		preview["condition"] = json.RawMessage(w.Condition)
@@ -49,6 +52,9 @@ func wakeupPreview(w db.IssueWakeup) map[string]any {
 	}
 	if w.FilterAgentID.Valid {
 		preview["filter_agent_id"] = util.UUIDToString(w.FilterAgentID)
+	}
+	if w.FilterTaskID.Valid {
+		preview["filter_task_id"] = util.UUIDToString(w.FilterTaskID)
 	}
 	if w.IntervalSeconds.Valid {
 		preview["interval_seconds"] = w.IntervalSeconds.Int64

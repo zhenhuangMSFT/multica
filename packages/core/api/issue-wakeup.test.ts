@@ -96,6 +96,26 @@ it("preserves wakeup origin while accepting old task responses", () => {
   expect(AgentTaskSchema.parse({ id: "run" }).wakeup_id).toBeUndefined();
 });
 
+it("preserves a run's historical schedule and isolates malformed snapshots", () => {
+  const snapshot = {
+    id: "wake", issue_id: "issue", agent_id: "agent", agent_name: "",
+    kind: "at", mode: "once", event_types: [], timezone: "UTC",
+    filter_task_id: null, filter_agent_name: null,
+    interval_seconds: null, cron_expression: null,
+    next_fire_at: "2099-01-01T10:09:00Z",
+  };
+  const run = { id: "run", wakeup_id: "wake", wakeup_snapshot: snapshot };
+  expect(AgentTaskSchema.parse(JSON.parse(JSON.stringify(run))).wakeup_snapshot).toEqual(snapshot);
+  const filtered = { ...snapshot, filter_agent_id: "source-agent", filter_task_id: "source-run" };
+  expect(AgentTaskSchema.parse({ ...run, wakeup_snapshot: filtered }).wakeup_snapshot).toEqual(filtered);
+  for (const value of [null, "invalid", { ...snapshot, kind: "future-kind" }, { ...snapshot, next_fire_at: 123 }]) {
+    expect(AgentTaskSchema.parse({ ...run, wakeup_snapshot: value })).toMatchObject({
+      id: "run", wakeup_id: "wake", wakeup_snapshot: undefined,
+    });
+  }
+  expect(AgentTaskSchema.parse({ id: "old-run", wakeup_id: "wake" }).wakeup_snapshot).toBeUndefined();
+});
+
 it("sends a scoped enable request without rewriting the configuration", async () => {
   const fetcher = vi.fn().mockResolvedValue(new Response("{}"));
   vi.stubGlobal("fetch", fetcher);

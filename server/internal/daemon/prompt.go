@@ -237,8 +237,10 @@ func buildPromptBody(task Task, provider string) string {
 			fmt.Fprintf(&b, "Inspect this configuration with `multica issue wakeup get %s %s --output json`. If recurring work is no longer needed, disable it with `multica issue wakeup disable %s %s`.\n", task.IssueID, task.WakeupID, task.IssueID, task.WakeupID)
 		}
 		if task.TriggerCommentID != "" {
-			fmt.Fprintf(&b, "Post your result using `multica issue comment add %s --parent %s --content-file ./reply.md --output table && rm ./reply.md`. This is the original delivery thread, not a new comment trigger.\n", task.IssueID, task.TriggerCommentID)
+			fmt.Fprintf(&b, "The saved delivery context is comment %s. It is not a new comment trigger or a permanent thread pin. Expand its thread along with newer relevant threads before choosing where to reply.\n", task.TriggerCommentID)
 		}
+		b.WriteString("Unless the user explicitly selected a pinned delivery thread, reply to the latest relevant user message after reading current comments. Respect a user-designated current progress thread or explicit thread pin instead; do not move an update to an unrelated newer message. A saved parent alone does not establish a user-selected pin.\n")
+		fmt.Fprintf(&b, "Post your result with `multica issue comment add %s --parent <selected-comment-id> --content-file ./reply.md --output table`. If there is no relevant user message or designated progress thread, omit `--parent` and post a new top-level update. Delete reply.md only after the post succeeds.\n", task.IssueID)
 		return b.String()
 	}
 	if task.ChatSessionID != "" {

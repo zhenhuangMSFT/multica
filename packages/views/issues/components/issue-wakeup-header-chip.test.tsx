@@ -72,6 +72,18 @@ describe("IssueWakeupHeaderChip", () => {
     expect(screen.getByRole("button", { name: /Grok 在等第 2 阶段完成/ })).toBeVisible();
   });
 
+  it("keeps the current header live through repeated rescheduling", () => {
+    rules = [rule({ kind: "at", next_fire_at: "2099-01-01T10:09:00Z" })];
+    const { rerender } = renderWithI18n(<IssueWakeupHeaderChip issueId="issue" onOpen={() => {}} />);
+    expect(screen.getByRole("button")).toHaveTextContent("10:09");
+    for (const time of ["10:20", "10:47"]) {
+      rules = [rule({ kind: "at", next_fire_at: `2099-01-01T${time}:00Z` })];
+      rerender(<IssueWakeupHeaderChip issueId="issue" onOpen={() => {}} />);
+      expect(screen.getByRole("button")).toHaveTextContent(time);
+      expect(screen.getByRole("button")).not.toHaveTextContent("10:09");
+    }
+  });
+
   it("renders nothing when the issue waits for nothing", () => {
     const { container } = renderWithI18n(<IssueWakeupHeaderChip issueId="issue" onOpen={() => {}} />);
     expect(container).toBeEmptyDOMElement();

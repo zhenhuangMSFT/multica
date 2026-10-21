@@ -65,7 +65,7 @@ func newIssueWakeupCommand() *cobra.Command {
 			c.Flags().String("filter-actor-id", "", "Actor user/agent UUID in this workspace; mutation events only")
 			c.Flags().String("filter-agent-id", "", "Run agent filter; legacy alias of actor=agent for mutation-only events")
 			c.Flags().String("task-id", "", "Match this specific run; terminal state is checked on registration")
-			c.Flags().String("parent", "", "Comment thread for result delivery")
+			c.Flags().String("parent", "", "Original delivery context; explicit user-selected thread pins belong in the instruction")
 			c.Flags().String("after", "", "Delay for at, e.g. 10m")
 			c.Flags().String("at", "", "Single RFC3339 timestamp")
 			c.Flags().String("every", "", "Fixed interval, e.g. 1h (minimum 1m)")

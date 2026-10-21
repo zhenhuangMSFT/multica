@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -307,7 +308,78 @@ func TestIssueWakeupRetryKeepsPromptAndSchedulingScope(t *testing.T) {
 	if child.HandoffNote != task.HandoffNote || child.CommentThreadID != w.ID {
 		t.Fatal("retry lost wakeup prompt or scope")
 	}
+	if child.TriggerEvidenceKind.String != "issue_wakeup" || child.TriggerEvidenceRefID != task.TriggerEvidenceRefID {
+		t.Fatal("retry lost wakeup delivery authority")
+	}
+	var originalContext, retryContext map[string]json.RawMessage
+	if err := json.Unmarshal(task.Context, &originalContext); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(child.Context, &retryContext); err != nil {
+		t.Fatal(err)
+	}
+	if string(originalContext["wakeup_snapshot"]) != string(retryContext["wakeup_snapshot"]) || len(retryContext["wakeup_snapshot"]) == 0 {
+		t.Fatal("retry changed or lost the historical wakeup snapshot")
+	}
 	f.Cleanup(t, "DELETE FROM agent_task_queue WHERE id=$1", child.ID)
+}
+
+func TestIssueWakeupReschedulingPreservesRunSnapshots(t *testing.T) {
+	f, s, issue, agent := wakeFixture(t)
+	ctx := context.Background()
+	var w db.IssueWakeup
+	var runs []db.AgentTaskQueue
+	var snapshots []string
+	for _, seconds := range []int64{60, 120, 300} {
+		var err error
+		w, err = s.Save(ctx, issue, parseTestUUID(t, f.UserID), pgtype.UUID{}, w.ID, WakeupInput{
+			AgentID: agent, Kind: "at", AfterSeconds: seconds, Instruction: "check progress",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		scheduled := time.Now().UTC().Add(-time.Duration(seconds) * time.Second).Truncate(time.Second)
+		f.Exec(t, "UPDATE issue_wakeup SET next_fire_at=$2 WHERE id=$1", w.ID, scheduled)
+		wakeDispatch(t, s, w)
+		w, err = f.q.GetIssueWakeup(ctx, db.GetIssueWakeupParams{ID: w.ID, WorkspaceID: w.WorkspaceID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		task, err := f.q.GetAgentTask(ctx, w.LastTaskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stored struct {
+			Snapshot json.RawMessage `json:"wakeup_snapshot"`
+		}
+		if err := json.Unmarshal(task.Context, &stored); err != nil {
+			t.Fatal(err)
+		}
+		var preview struct {
+			NextFireAt string `json:"next_fire_at"`
+		}
+		if err := json.Unmarshal(stored.Snapshot, &preview); err != nil {
+			t.Fatal(err)
+		}
+		if preview.NextFireAt != scheduled.Format(time.RFC3339) {
+			t.Fatalf("snapshot time = %q, want %q", preview.NextFireAt, scheduled.Format(time.RFC3339))
+		}
+		runs = append(runs, task)
+		snapshots = append(snapshots, string(stored.Snapshot))
+		f.Exec(t, "UPDATE agent_task_queue SET status='completed',completed_at=now() WHERE id=$1", task.ID)
+		for i, prior := range runs {
+			reloaded, err := f.q.GetAgentTask(ctx, prior.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(reloaded.Context, &stored); err != nil {
+				t.Fatal(err)
+			}
+			if string(stored.Snapshot) != snapshots[i] {
+				t.Fatalf("rescheduling rewrote snapshot of run %s", util.UUIDToString(prior.ID))
+			}
+		}
+	}
 }
 
 func TestIssueWakeupConcurrentDispatchIsIdempotent(t *testing.T) {

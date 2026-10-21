@@ -1,7 +1,7 @@
 "use client";
 
 import { Bell, Clock3, Hourglass, ListChecks, RefreshCw, TriangleAlert } from "lucide-react";
-import type { TimelineEntry, WakeupCondition, WakeupPreview } from "@multica/core/types";
+import type { TimelineEntry, WakeupPreview } from "@multica/core/types";
 import { useT } from "../../i18n";
 import type { useWakeupText } from "./wakeup-presentation";
 import { conditionIcon } from "./wakeups-section";
@@ -19,20 +19,8 @@ export const WAKEUP_ACTIVITY_ACTIONS = new Set([
   "wakeup_checkin",
 ]);
 
-interface StoredPreview {
-  id?: string;
-  kind?: WakeupPreview["kind"];
-  mode?: WakeupPreview["mode"];
-  event_types?: string[];
-  agent_id?: string;
-  timezone?: string;
-  condition?: WakeupCondition;
-  filter_actor_type?: "member" | "agent";
-  filter_actor_id?: string;
-  filter_agent_id?: string;
-  interval_seconds?: number;
-  cron_expression?: string;
-  next_fire_at?: string;
+interface StoredPreview extends Partial<WakeupPreview> {
+  filter_agent_id?: string | null;
   created_by?: string;
   created_by_agent_id?: string;
 }
@@ -66,26 +54,31 @@ function detailsOf(entry: TimelineEntry): WakeupDetails {
  * The rule as it was when the entry was written, in the shape the wakeup text
  * helpers read. Names come from the workspace directory.
  */
-function previewOf(stored: StoredPreview, getActorName: ActorName): WakeupPreview {
+export function wakeupSnapshotPreview(stored: StoredPreview, getActorName: ActorName): WakeupPreview {
   return {
     id: stored.id ?? "",
     issue_id: "",
     agent_id: stored.agent_id ?? "",
-    agent_name: stored.agent_id ? getActorName("agent", stored.agent_id) : "",
+    agent_name: stored.agent_name || (stored.agent_id ? getActorName("agent", stored.agent_id) : ""),
     kind: stored.kind ?? "event",
     mode: stored.mode ?? "once",
     event_types: stored.event_types ?? [],
-    filter_task_id: null,
-    filter_agent_name: stored.filter_agent_id ? getActorName("agent", stored.filter_agent_id) : null,
+    filter_task_id: stored.filter_task_id ?? null,
+    filter_agent_name: stored.filter_agent_name || (stored.filter_agent_id ? getActorName("agent", stored.filter_agent_id) : null),
     filter_actor_type: stored.filter_actor_type ?? null,
     filter_actor_id: stored.filter_actor_id ?? null,
-    filter_actor_name: stored.filter_actor_type && stored.filter_actor_id ? getActorName(stored.filter_actor_type, stored.filter_actor_id) : null,
+    filter_actor_name: stored.filter_actor_name || (stored.filter_actor_type && stored.filter_actor_id ? getActorName(stored.filter_actor_type, stored.filter_actor_id) : null),
     interval_seconds: stored.interval_seconds ?? null,
     cron_expression: stored.cron_expression ?? null,
     timezone: stored.timezone ?? "UTC",
     next_fire_at: stored.next_fire_at ?? null,
     condition: stored.condition ?? null,
   };
+}
+
+export function wakeupActivityPreview(entry: TimelineEntry, getActorName: ActorName): WakeupPreview | undefined {
+  const stored = detailsOf(entry).wakeup;
+  return stored ? wakeupSnapshotPreview(stored, getActorName) : undefined;
 }
 
 export function formatWakeupActivity(
@@ -95,7 +88,7 @@ export function formatWakeupActivity(
   getActorName: ActorName,
 ): string {
   const details = detailsOf(entry);
-  const preview = details.wakeup ? previewOf(details.wakeup, getActorName) : null;
+  const preview = wakeupActivityPreview(entry, getActorName);
   const condition = preview ? text.trigger(preview) : "";
   const agent = preview?.agent_name ?? "";
   switch (entry.action) {
@@ -164,7 +157,7 @@ export function wakeupActivityChip(
   const details = detailsOf(entry);
   if (details.rule === "child_done") return t(($) => $.activity.wakeup_chip_system);
   if (entry.action === "wakeup_created" || !details.wakeup) return null;
-  if (entry.action === "wakeup_checkin") return text.trigger(previewOf(details.wakeup, getActorName));
+  if (entry.action === "wakeup_checkin") return text.trigger(wakeupSnapshotPreview(details.wakeup, getActorName));
   const creator = details.wakeup.created_by_agent_id
     ? getActorName("agent", details.wakeup.created_by_agent_id)
     : details.wakeup.created_by

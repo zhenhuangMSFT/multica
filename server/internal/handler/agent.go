@@ -525,6 +525,7 @@ type AgentTaskResponse struct {
 	QuickCreateAttachmentIDs []string             `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
 	QuickCreateSourceContext json.RawMessage      `json:"quick_create_source_context,omitempty"` // immutable historical context for source-context quick-create
 	WakeupID                 string               `json:"wakeup_id,omitempty"`
+	WakeupSnapshot           json.RawMessage      `json:"wakeup_snapshot,omitempty"`
 	WakeupSystemRule         string               `json:"wakeup_system_rule,omitempty"`      // set when a platform rule (e.g. child_done) started the run
 	WakeupJoined             string               `json:"wakeup_joined,omitempty"`           // wakeups that fired while this run waited to start and joined it instead of queuing their own
 	HandoffNote              string               `json:"handoff_note,omitempty"`            // legacy assignment handoff instruction retained for installed clients; rendered by the daemon only in the per-turn prompt
@@ -834,8 +835,9 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		branchName = t.BranchName.String
 	}
 	var wakeupContext struct {
-		ID         string `json:"wakeup_id"`
-		SystemRule string `json:"wakeup_system"`
+		ID         string          `json:"wakeup_id"`
+		SystemRule string          `json:"wakeup_system"`
+		Snapshot   json.RawMessage `json:"wakeup_snapshot"`
 	}
 	_ = json.Unmarshal(t.Context, &wakeupContext)
 	handoffNote := ""
@@ -872,6 +874,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		TriggerSummary:         textToPtr(t.TriggerSummary),
 		HandoffNote:            handoffNote,
 		WakeupID:               wakeupContext.ID,
+		WakeupSnapshot:         wakeupContext.Snapshot,
 		WakeupSystemRule:       wakeupContext.SystemRule,
 		WakeupJoined:           service.JoinedWakeupNotes(t.Context),
 		WorkDir:                workDir,
