@@ -53,6 +53,9 @@ func wakeupPreview(w db.IssueWakeup) map[string]any {
 	if w.FilterAgentID.Valid {
 		preview["filter_agent_id"] = util.UUIDToString(w.FilterAgentID)
 	}
+	if w.FilterTaskID.Valid {
+		preview["filter_task_id"] = util.UUIDToString(w.FilterTaskID)
+	}
 	if w.IntervalSeconds.Valid {
 		preview["interval_seconds"] = w.IntervalSeconds.Int64
 	}

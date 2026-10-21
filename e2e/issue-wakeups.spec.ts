@@ -42,7 +42,7 @@ test("members see the child-done system rule and create a wakeup", async ({ page
       localStorage.setItem("multica:chat:isOpen", "false");
     }, api.getToken());
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.goto(`/${workspace.slug}/issues/${parent.id}`, { waitUntil: "domcontentloaded" });
+    await page.goto(`/${workspace.slug}/issues/${parent.identifier}`, { waitUntil: "domcontentloaded" });
 
     const systemRule = page.getByRole("button", { name: /When stage 1's sub-issues all finish/ });
     await expect(systemRule).toBeVisible({ timeout: 45_000 });
@@ -117,7 +117,8 @@ test("a member waits for a condition the platform checks", async ({ page }) => {
       localStorage.setItem("multica:chat:isOpen", "false");
     }, api.getToken());
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.goto(`/${workspace.slug}/issues/${issue.id}`, { waitUntil: "domcontentloaded" });
+    // Avoid a UUID-to-identifier navigation remounting the open form.
+    await page.goto(`/${workspace.slug}/issues/${issue.identifier}`, { waitUntil: "domcontentloaded" });
 
     await page.getByRole("button", { name: "New wakeup" }).click({ timeout: 45_000 });
     const form = page.getByRole("form", { name: "New wakeup" });

@@ -9,6 +9,27 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+func TestWakeupSnapshotKeepsEventFilters(t *testing.T) {
+	w := db.IssueWakeup{
+		Kind: "event", Mode: "once", EventTypes: []string{"task.completed"},
+		FilterAgentID:   pgtype.UUID{Bytes: [16]byte{15: 1}, Valid: true},
+		FilterTaskID:    pgtype.UUID{Bytes: [16]byte{15: 2}, Valid: true},
+		FilterActorType: pgtype.Text{String: "member", Valid: true},
+		FilterActorID:   pgtype.UUID{Bytes: [16]byte{15: 3}, Valid: true},
+	}
+	snapshot := wakeupPreview(w)
+	for key, want := range map[string]string{
+		"filter_agent_id":   "00000000-0000-0000-0000-000000000001",
+		"filter_task_id":    "00000000-0000-0000-0000-000000000002",
+		"filter_actor_id":   "00000000-0000-0000-0000-000000000003",
+		"filter_actor_type": "member",
+	} {
+		if snapshot[key] != want {
+			t.Fatalf("%s = %v, want %s", key, snapshot[key], want)
+		}
+	}
+}
+
 func TestWakeupSnapshotKeepsHistoricalSchedules(t *testing.T) {
 	w := db.IssueWakeup{Kind: "at", Mode: "once", EventTypes: []string{}, Timezone: "UTC"}
 	var persisted [][]byte

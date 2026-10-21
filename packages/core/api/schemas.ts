@@ -2027,7 +2027,7 @@ export const AgentTaskSchema = z.object({
   wakeup_id: z.string().optional().catch(undefined),
   wakeup_snapshot: z.lazy(() => IssueWakeupSummaryRowSchema.omit({
     active_count: true, event_count: true,
-  })).optional().catch(undefined),
+  }).extend({ filter_agent_id: z.string().nullable().optional() })).optional().catch(undefined),
   cancelled_by_comment_change: z.boolean().optional().catch(undefined),
   cancelled_by: TaskCancellationActorSchema.optional().catch(undefined),
   id: z.string(),

@@ -106,6 +106,8 @@ it("preserves a run's historical schedule and isolates malformed snapshots", () 
   };
   const run = { id: "run", wakeup_id: "wake", wakeup_snapshot: snapshot };
   expect(AgentTaskSchema.parse(JSON.parse(JSON.stringify(run))).wakeup_snapshot).toEqual(snapshot);
+  const filtered = { ...snapshot, filter_agent_id: "source-agent", filter_task_id: "source-run" };
+  expect(AgentTaskSchema.parse({ ...run, wakeup_snapshot: filtered }).wakeup_snapshot).toEqual(filtered);
   for (const value of [null, "invalid", { ...snapshot, kind: "future-kind" }, { ...snapshot, next_fire_at: 123 }]) {
     expect(AgentTaskSchema.parse({ ...run, wakeup_snapshot: value })).toMatchObject({
       id: "run", wakeup_id: "wake", wakeup_snapshot: undefined,

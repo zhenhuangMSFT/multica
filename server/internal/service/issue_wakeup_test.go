@@ -308,6 +308,9 @@ func TestIssueWakeupRetryKeepsPromptAndSchedulingScope(t *testing.T) {
 	if child.HandoffNote != task.HandoffNote || child.CommentThreadID != w.ID {
 		t.Fatal("retry lost wakeup prompt or scope")
 	}
+	if child.TriggerEvidenceKind.String != "issue_wakeup" || child.TriggerEvidenceRefID != task.TriggerEvidenceRefID {
+		t.Fatal("retry lost wakeup delivery authority")
+	}
 	var originalContext, retryContext map[string]json.RawMessage
 	if err := json.Unmarshal(task.Context, &originalContext); err != nil {
 		t.Fatal(err)

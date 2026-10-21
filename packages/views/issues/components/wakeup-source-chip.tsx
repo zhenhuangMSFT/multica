@@ -8,7 +8,7 @@ import type { AgentTask, TimelineEntry } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useT } from "../../i18n";
 import { useWakeupText } from "./wakeup-presentation";
-import { wakeupActivityPreview } from "./wakeup-activity";
+import { wakeupActivityPreview, wakeupSnapshotPreview } from "./wakeup-activity";
 
 function useRunWakeupSnapshot(task: AgentTask) {
   const { getActorName } = useActorName();
@@ -22,7 +22,9 @@ function useRunWakeupSnapshot(task: AgentTask) {
     enabled: !!task.issue_id && !!task.wakeup_id && !task.wakeup_snapshot,
     select,
   });
-  return task.wakeup_snapshot ?? (entry ? wakeupActivityPreview(entry, getActorName) : undefined);
+  return task.wakeup_snapshot
+    ? wakeupSnapshotPreview(task.wakeup_snapshot, getActorName)
+    : (entry ? wakeupActivityPreview(entry, getActorName) : undefined);
 }
 
 /**
