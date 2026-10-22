@@ -89,7 +89,14 @@ The simulation-only transaction coordinator supplies durable envelope/journal
 storage and stopped-task update/rollback sequencing. `auth probe` independently
 collects bounded authenticated API evidence, but never certifies tunnel forwarding
 or provider readiness. None of these enable a production scheduler executor or
-shared maintenance authority. Missing live adapters remain explicit.
+shared maintenance authority. Missing trusted production execution and live
+qualification remain explicit.
+
+The [read-only snapshot increment](WORKER-SNAPSHOT.md) supplies exact root-task
+XML and versioned definition hashes, release/config file hashes and referenced
+process identity observations. It does not prove child absence; unknown coverage
+keeps transaction updates blocked. No production execution or host qualification
+is enabled by collecting a snapshot.
 
 ## Shared admission/drain proposal for review
 

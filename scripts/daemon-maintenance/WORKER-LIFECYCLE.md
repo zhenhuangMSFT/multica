@@ -9,6 +9,7 @@ administer a host. It is not an installer or maintenance authority.
 Import-Module .\scripts\daemon-maintenance\WorkerLifecycle.psm1
 pwsh -NoProfile -File .\scripts\daemon-maintenance\WorkerLifecycle.test.ps1
 pwsh -NoProfile -File .\scripts\daemon-maintenance\WorkerTransaction.test.ps1
+pwsh -NoProfile -File .\scripts\daemon-maintenance\WorkerSnapshot.test.ps1
 pwsh -NoProfile -File .\scripts\daemon-maintenance\WorkerLifecycle.integration.test.ps1 `
   -WorkerPackagePath .\scripts\windows-worker
 ```
@@ -145,8 +146,9 @@ checks at the same points, not by duplicating the logic:
 
 1. Load independently trusted receipt, actual exact-path tasks, immutable files and
    process identities. Preserve original XML for rollback. Task absence must be
-   distinguished from access/read failure. Implement deterministic canonicalization
-   and test actual scheduler serialization before issuing a receipt.
+   distinguished from access/read failure. Use the versioned definition canonicalizer
+   and qualify actual scheduler serialization before issuing a receipt; complete
+   child lineage/absence tracking remains separate from diagnostic PID observations.
 2. Establish actual core maintenance acquisition, durable lease/generation and
    suppressed launch/respawn across all writers. The receipt cannot act as a lease.
 3. Journal before writes; register/re-read disabled task definitions one at a time,
@@ -176,9 +178,17 @@ ACL/provenance checks remain required. Exception-boundary tests are not power-lo
 qualification. Timestamp-preserving JSON decoding supports PowerShell 7.0+ and
 rejects duplicate stored keys; no PowerShell upgrade is required on the pilot.
 
-No trusted live scheduler adapter, protected production receipt loader, canary
-finalization, full readiness aggregator, atomic health publisher or shared
-drain/lease implementation is claimed. Those are engineering/qualification
+The [read-only snapshot adapter](WORKER-SNAPSHOT.md) now reads exact root task XML,
+enabled/state observations, immutable file hashes and explicitly referenced
+PID/creation/image/owner identities. Versioned definition hashes remove only
+documented serialization noise, preserving exact original XML separately.
+This diagnostic adapter never proves child absence: unknown coverage blocks
+updates instead of being converted to stopped. Its real Windows COM/CIM path
+still requires owner-session qualification; fixtures are not live host evidence.
+
+No trusted production scheduler executor, protected production receipt loader,
+canary finalization, full readiness aggregator, atomic health publisher or shared
+drain/lease implementation is claimed. These remain engineering/qualification
 dependencies, not merely owner approvals.
 
 The integration test consumes the actual v2 installer Plan and launch-policy

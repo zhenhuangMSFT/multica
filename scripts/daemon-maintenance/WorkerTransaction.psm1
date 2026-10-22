@@ -5,7 +5,7 @@ Import-Module (Join-Path $PSScriptRoot 'WorkerLifecycle.psm1')
 
 function Assert-Simulation([string]$ExecutionMode) {
     if ($ExecutionMode -cne 'Simulation') {
-        throw 'Production execution unavailable: enforced lease and trusted snapshot adapters are not implemented.'
+        throw 'Production execution unavailable: enforced lease, trusted receipt provenance and fenced host execution are not implemented.'
     }
 }
 function Copy-Record($Value) {
