@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	lifecyclev1 "github.com/multica-ai/multica/server/pkg/lifecycle/v1"
 	"github.com/spf13/cobra"
 )
 
 func newRuntimeMaintenanceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "maintenance <status|acquire|recover|release|get> <runtime-id> [request-id]",
+		Use:   "maintenance <capabilities|status|acquire|recover|release|get> <runtime-id> [request-id]",
 		Short: "Control daemon-wide local admission through the authenticated backend",
 		Args:  cobra.RangeArgs(2, 3),
 		RunE:  runRuntimeMaintenance,
@@ -34,16 +34,20 @@ func runRuntimeMaintenance(cmd *cobra.Command, args []string) error {
 	if err := requireHumanLocalCommand("runtime maintenance"); err != nil {
 		return err
 	}
-	var command *protocol.MaintenanceCommand
+	var command *lifecyclev1.MaintenanceCommand
 	requestID := ""
-	if args[0] == "get" {
-		if len(args) != 3 {
-			return errors.New("get requires a request ID")
+	if args[0] == "get" || args[0] == "capabilities" {
+		if args[0] == "get" {
+			if len(args) != 3 {
+				return errors.New("get requires a request ID")
+			}
+			requestID = args[2]
+		} else if len(args) != 2 {
+			return errors.New("capabilities does not accept a request ID")
 		}
-		requestID = args[2]
 		for _, name := range []string{"command-id", "issued-at", "expect-daemon", "expect-host", "target-profile", "holder", "generation", "expires-at"} {
 			if cmd.Flags().Changed(name) {
-				return fmt.Errorf("get does not accept --%s", name)
+				return fmt.Errorf("%s does not accept --%s", args[0], name)
 			}
 		}
 	} else {
@@ -51,7 +55,7 @@ func runRuntimeMaintenance(cmd *cobra.Command, args []string) error {
 			return errors.New("submit does not accept a positional request ID")
 		}
 		value := func(name string) string { s, _ := cmd.Flags().GetString(name); return s }
-		command = &protocol.MaintenanceCommand{
+		command = &lifecyclev1.MaintenanceCommand{
 			ID: value("command-id"), Operation: args[0], DaemonID: value("expect-daemon"),
 			Host: value("expect-host"), Profile: value("target-profile"), Holder: value("holder"),
 		}
@@ -80,6 +84,13 @@ func runRuntimeMaintenance(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
+	}
+	if args[0] == "capabilities" {
+		result, err := client.MaintenanceCapabilities(cmd.Context(), args[1])
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 	}
 	result, err := client.Maintenance(cmd.Context(), args[1], requestID, command)
 	if err != nil {

@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	lifecyclev1 "github.com/multica-ai/multica/server/pkg/lifecycle/v1"
 )
 
 type maintenanceReceipt struct {
-	Delivery protocol.MaintenanceDelivery `json:"delivery"`
-	Result   *protocol.MaintenanceResult  `json:"result"`
+	Delivery lifecyclev1.MaintenanceDelivery `json:"delivery"`
+	Result   *lifecyclev1.MaintenanceResult  `json:"result"`
 }
 
 type maintenanceReceipts struct {
@@ -93,7 +93,7 @@ func (d *Daemon) loadMaintenanceReceipts(dir string) error {
 
 func validMaintenanceReceipt(receipt maintenanceReceipt, record maintenanceRecord, daemon string) bool {
 	command := receipt.Delivery.Command
-	request := protocol.MaintenanceRequest{Delivery: receipt.Delivery, State: "pending"}
+	request := lifecyclev1.MaintenanceRequest{Delivery: receipt.Delivery, State: "pending"}
 	return receipt.Result == nil && command.Host == record.Host && command.Profile == record.Profile &&
 		command.DaemonID == daemon && request.Validate() == nil
 }
@@ -111,10 +111,10 @@ func readMaintenanceReceipt(path string, receipt *maintenanceReceipt) error {
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() || info.Size() > protocol.MaintenanceBodyLimit {
+	if !info.Mode().IsRegular() || info.Size() > lifecyclev1.MaintenanceBodyLimit {
 		return errors.New("invalid maintenance receipt file")
 	}
-	return protocol.DecodeMaintenanceJSON(file, receipt)
+	return lifecyclev1.DecodeMaintenanceJSON(file, receipt)
 }
 
 func (s *maintenanceReceipts) write(suffix string, receipt maintenanceReceipt) error {
@@ -143,9 +143,9 @@ func (s *maintenanceReceipts) write(suffix string, receipt maintenanceReceipt) e
 	return closeErr
 }
 
-func (d *Daemon) maintenanceStatus() protocol.MaintenanceStatus {
+func (d *Daemon) maintenanceStatus() lifecyclev1.MaintenanceStatus {
 	o := d.observeMaintenance()
-	return protocol.MaintenanceStatus{
+	return lifecyclev1.MaintenanceStatus{
 		ObservedAt: time.Now().UTC(),
 		Host:       o.Record.Host, Profile: o.Record.Profile, Holder: o.Record.Holder, Generation: o.Record.Generation,
 		ExpiresAt: o.Record.ExpiresAt, Blocked: o.Blocked, ClaimsInFlight: o.ClaimsInFlight,
@@ -168,11 +168,11 @@ func (d *Daemon) maintenancePersistenceFailed(err error) {
 // The caller serializes command execution. Only a fresh authenticated backend
 // delivery reaches here; neither a local listener nor receipt replay grants
 // permission to mutate admission.
-func (d *Daemon) executeMaintenance(delivery protocol.MaintenanceDelivery, now time.Time) protocol.MaintenanceResult {
+func (d *Daemon) executeMaintenance(delivery lifecyclev1.MaintenanceDelivery, now time.Time) lifecyclev1.MaintenanceResult {
 	command := delivery.Command
-	result := protocol.MaintenanceResult{Delivery: delivery, Code: "rejected"}
+	result := lifecyclev1.MaintenanceResult{Delivery: delivery, Code: "rejected"}
 	status := d.maintenanceStatus()
-	request := protocol.MaintenanceRequest{Delivery: delivery, State: "pending"}
+	request := lifecyclev1.MaintenanceRequest{Delivery: delivery, State: "pending"}
 	if command.Validate(now) != nil || command.DaemonID != d.cfg.DaemonID ||
 		command.Host != status.Host || command.Profile != status.Profile || request.Validate() != nil {
 		result.Code = "target_mismatch"
@@ -247,7 +247,7 @@ func (d *Daemon) pollMaintenance(ctx context.Context, runtimeID string) {
 		return
 	}
 	d.lastMaintenancePoll = time.Now()
-	var delivery protocol.MaintenanceDelivery
+	var delivery lifecyclev1.MaintenanceDelivery
 	found, err := d.client.maintenanceRequest(ctx, "/api/daemon/runtimes/"+runtimeID+"/maintenance/claim", nil, &delivery)
 	if err != nil {
 		d.logger.Debug("maintenance delivery unavailable; admission unchanged")
@@ -256,7 +256,7 @@ func (d *Daemon) pollMaintenance(ctx context.Context, runtimeID string) {
 	if !found {
 		return
 	}
-	if request := (protocol.MaintenanceRequest{Delivery: delivery, State: "pending"}); request.Validate() != nil {
+	if request := (lifecyclev1.MaintenanceRequest{Delivery: delivery, State: "pending"}); request.Validate() != nil {
 		d.logger.Warn("invalid maintenance delivery refused")
 		return
 	}
@@ -284,7 +284,7 @@ func (c *Client) maintenanceRequest(ctx context.Context, path string, payload an
 	client := *c.client
 	if transport, ok := c.client.Transport.(*http.Transport); ok {
 		bounded := transport.Clone()
-		bounded.MaxResponseHeaderBytes = protocol.MaintenanceBodyLimit
+		bounded.MaxResponseHeaderBytes = lifecyclev1.MaintenanceBodyLimit
 		defer bounded.CloseIdleConnections()
 		client.Transport = bounded
 	}
@@ -301,15 +301,15 @@ func (c *Client) maintenanceRequest(ctx context.Context, path string, payload an
 		return false, fmt.Errorf("maintenance backend returned HTTP %d", resp.StatusCode)
 	}
 	if target != nil {
-		if err := protocol.DecodeMaintenanceJSON(resp.Body, target); err != nil {
+		if err := lifecyclev1.DecodeMaintenanceJSON(resp.Body, target); err != nil {
 			return false, err
 		}
 	} else {
-		var ack protocol.MaintenanceAcknowledgment
-		if err := protocol.DecodeMaintenanceJSON(resp.Body, &ack); err != nil {
+		var ack lifecyclev1.MaintenanceAcknowledgment
+		if err := lifecyclev1.DecodeMaintenanceJSON(resp.Body, &ack); err != nil {
 			return false, err
 		}
-		result, ok := payload.(protocol.MaintenanceResult)
+		result, ok := payload.(lifecyclev1.MaintenanceResult)
 		if !ok || !ack.Accepted || ack.ID != result.Delivery.Command.ID {
 			return false, errors.New("maintenance result acknowledgment mismatch")
 		}

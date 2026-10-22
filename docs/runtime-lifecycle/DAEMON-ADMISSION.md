@@ -253,7 +253,7 @@ owner decisions. GitHub PR-link repair remains a platform dependency.
 
 ```powershell
 Set-Location .\server
-go test ./pkg/protocol ./internal/daemoncontrol ./internal/service ./internal/handler ./internal/daemon ./internal/cli ./cmd/multica -run 'TestMaintenance|TestRuntimeMaintenance|TestTryEnterClaim|TestTrySetClaimBarrier|TestHandleUpdate|TestTryAutoUpdate|TestTrySelfReload' -count=1 -timeout 180s
+go test ./pkg/lifecycle/v1 ./internal/daemoncontrol ./internal/service ./internal/handler ./internal/daemon ./internal/cli ./cmd/multica -run 'TestLifecycleV1|TestMaintenance|TestRuntimeMaintenance|TestTryEnterClaim|TestTrySetClaimBarrier|TestHandleUpdate|TestTryAutoUpdate|TestTrySelfReload' -count=1 -timeout 180s
 ```
 
 Set `REDIS_MAINTENANCE_TEST_URL` to an isolated Redis fixture for real atomic

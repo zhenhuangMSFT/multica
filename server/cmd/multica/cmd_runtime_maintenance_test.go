@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/cli"
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	lifecyclev1 "github.com/multica-ai/multica/server/pkg/lifecycle/v1"
 )
 
 func TestRuntimeMaintenanceRejectsTaskContextBeforeConfiguration(t *testing.T) {
@@ -32,11 +32,12 @@ func TestRuntimeMaintenanceExplicitInputsAndTypedOutput(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer fixture-token" {
 			t.Error("fixture credential missing")
 		}
-		var command protocol.MaintenanceCommand
-		if err := protocol.DecodeMaintenanceJSON(r.Body, &command); err != nil {
+
+		var command lifecyclev1.MaintenanceCommand
+		if err := lifecyclev1.DecodeMaintenanceJSON(r.Body, &command); err != nil {
 			t.Error(err)
 		}
-		result := protocol.MaintenanceRequest{Delivery: protocol.MaintenanceDelivery{
+		result := lifecyclev1.MaintenanceRequest{Delivery: lifecyclev1.MaintenanceDelivery{
 			Command: command, OwnerID: "22222222-2222-4222-8222-222222222222", Scope: strings.Repeat("a", 64),
 		}, State: "pending"}
 		w.WriteHeader(http.StatusAccepted)
@@ -63,8 +64,8 @@ func TestRuntimeMaintenanceExplicitInputsAndTypedOutput(t *testing.T) {
 	if err := runRuntimeMaintenance(cmd, []string{"status", runtimeID}); err != nil {
 		t.Fatal(err)
 	}
-	var result protocol.MaintenanceRequest
-	if err := protocol.DecodeMaintenanceJSON(&output, &result); err != nil || result.Delivery.Command.ID != commandID {
+	var result lifecyclev1.MaintenanceRequest
+	if err := lifecyclev1.DecodeMaintenanceJSON(&output, &result); err != nil || result.Delivery.Command.ID != commandID {
 		t.Fatalf("%+v %v", result, err)
 	}
 	_ = cmd.Flags().Set("holder", "executor")

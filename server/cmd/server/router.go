@@ -2354,6 +2354,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/activity", h.GetRuntimeTaskActivity)
 					r.Post("/update", h.InitiateUpdate)
 					r.With(handler.RequireHumanActor).Post("/maintenance", maintenanceControl.Submit)
+					r.With(handler.RequireHumanActor).Get("/maintenance/capabilities", maintenanceControl.Capabilities)
 					r.With(handler.RequireHumanActor).Get("/maintenance/{requestId}", maintenanceControl.Get)
 					r.Get("/update/{updateId}", h.GetUpdate)
 					r.Post("/models", h.InitiateListModels)

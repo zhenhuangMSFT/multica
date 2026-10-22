@@ -16,11 +16,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/middleware"
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	lifecyclev1 "github.com/multica-ai/multica/server/pkg/lifecycle/v1"
 	"github.com/redis/go-redis/v9"
 )
 
-func redisFixture(t *testing.T) (*RedisStore, protocol.MaintenanceDelivery) {
+func redisFixture(t *testing.T) (*RedisStore, lifecyclev1.MaintenanceDelivery) {
 	t.Helper()
 	url := os.Getenv("REDIS_MAINTENANCE_TEST_URL")
 	if url == "" {
@@ -36,7 +36,7 @@ func redisFixture(t *testing.T) (*RedisStore, protocol.MaintenanceDelivery) {
 	}
 	command := commandFixture()
 	command.ID, command.DaemonID = uuid.NewString(), "fixture-"+uuid.NewString()
-	delivery := protocol.MaintenanceDelivery{Command: command, OwnerID: fixtureOwner, Scope: strings.Repeat("a", 64)}
+	delivery := lifecyclev1.MaintenanceDelivery{Command: command, OwnerID: fixtureOwner, Scope: strings.Repeat("a", 64)}
 	t.Cleanup(func() {
 		if err := client.Del(context.Background(), requestKey(command.ID), activeKey(command.DaemonID)).Err(); err != nil {
 			t.Error(err)
@@ -95,7 +95,7 @@ func TestMaintenanceRedisReplayAndConcurrentDelivery(t *testing.T) {
 	if err != nil || request.State != "delivered" {
 		t.Fatalf("lost persisted delivery: %+v %v", request, err)
 	}
-	result := protocol.MaintenanceResult{Delivery: delivery, Code: "ok", Status: protocol.MaintenanceStatus{
+	result := lifecyclev1.MaintenanceResult{Delivery: delivery, Code: "ok", Status: lifecyclev1.MaintenanceStatus{
 		Host: delivery.Command.Host, Profile: delivery.Command.Profile, ObservedAt: time.Now().UTC(),
 	}}
 	forged := result

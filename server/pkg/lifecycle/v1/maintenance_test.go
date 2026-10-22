@@ -1,4 +1,4 @@
-package protocol
+package lifecyclev1
 
 import (
 	"encoding/json"

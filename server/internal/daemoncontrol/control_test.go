@@ -24,7 +24,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	lifecyclev1 "github.com/multica-ai/multica/server/pkg/lifecycle/v1"
 )
 
 const fixtureOwner = "22222222-2222-4222-8222-222222222222"
@@ -60,28 +60,28 @@ func (d *fixtureDirectory) GetMemberByUserAndWorkspace(_ context.Context, input 
 
 type fixtureStore struct {
 	created int
-	request *protocol.MaintenanceRequest
+	request *lifecyclev1.MaintenanceRequest
 	err     error
 }
 
-func (s *fixtureStore) Create(_ context.Context, d protocol.MaintenanceDelivery) (*protocol.MaintenanceRequest, error) {
+func (s *fixtureStore) Create(_ context.Context, d lifecyclev1.MaintenanceDelivery) (*lifecyclev1.MaintenanceRequest, error) {
 	s.created++
-	s.request = &protocol.MaintenanceRequest{Delivery: d, State: "pending"}
+	s.request = &lifecyclev1.MaintenanceRequest{Delivery: d, State: "pending"}
 	return s.request, s.err
 }
-func (s *fixtureStore) Get(context.Context, string) (*protocol.MaintenanceRequest, error) {
+func (s *fixtureStore) Get(context.Context, string) (*lifecyclev1.MaintenanceRequest, error) {
 	return s.request, s.err
 }
-func (s *fixtureStore) Pending(context.Context, string) (*protocol.MaintenanceRequest, error) {
+func (s *fixtureStore) Pending(context.Context, string) (*lifecyclev1.MaintenanceRequest, error) {
 	return s.request, s.err
 }
-func (s *fixtureStore) Deliver(context.Context, protocol.MaintenanceDelivery) (bool, error) {
+func (s *fixtureStore) Deliver(context.Context, lifecyclev1.MaintenanceDelivery) (bool, error) {
 	return true, s.err
 }
-func (s *fixtureStore) Complete(context.Context, protocol.MaintenanceResult) error { return s.err }
+func (s *fixtureStore) Complete(context.Context, lifecyclev1.MaintenanceResult) error { return s.err }
 
-func commandFixture() protocol.MaintenanceCommand {
-	return protocol.MaintenanceCommand{ID: "11111111-1111-4111-8111-111111111111", Operation: "status",
+func commandFixture() lifecyclev1.MaintenanceCommand {
+	return lifecyclev1.MaintenanceCommand{ID: "11111111-1111-4111-8111-111111111111", Operation: "status",
 		DaemonID: "fixture-daemon", Host: "fixture-host", Profile: "fixture", IssuedAt: time.Now().UTC()}
 }
 func userToken(t *testing.T, user string) string {
@@ -136,6 +136,7 @@ func controlRoutes(control *Control) http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(db.New(taskAuthDB{}), nil, nil, nil))
 		r.Post("/api/runtimes/{runtimeId}/maintenance", control.Submit)
+		r.Get("/api/runtimes/{runtimeId}/maintenance/capabilities", control.Capabilities)
 		r.Get("/api/runtimes/{runtimeId}/maintenance/{requestId}", control.Get)
 	})
 	r.Group(func(r chi.Router) {
@@ -280,7 +281,7 @@ func TestMaintenanceHandlerStrictInputAndStoreFailure(t *testing.T) {
 		{"duplicate", func(s string) string { return strings.Replace(s, `"host":`, `"host":"other","host":`, 1) }, &fixtureStore{}, 400},
 		{"unknown", func(s string) string { return strings.Replace(s, `"host":`, `"unknown":true,"host":`, 1) }, &fixtureStore{}, 400},
 		{"missing", func(string) string { return `{"operation":"status"}` }, &fixtureStore{}, 400},
-		{"oversize", func(string) string { return strings.Repeat(" ", protocol.MaintenanceBodyLimit+1) }, &fixtureStore{}, 400},
+		{"oversize", func(string) string { return strings.Repeat(" ", lifecyclev1.MaintenanceBodyLimit+1) }, &fixtureStore{}, 400},
 		{"unconfigured", func(s string) string { return s }, nil, 503},
 		{"failed-write", func(s string) string { return s }, &fixtureStore{err: errors.New("private storage error")}, 503},
 		{"conflict", func(s string) string { return s }, &fixtureStore{err: ErrConflict}, 409},
@@ -308,8 +309,8 @@ func TestMaintenanceDaemonAndResultBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery := protocol.MaintenanceDelivery{Command: commandFixture(), OwnerID: fixtureOwner, Scope: scope}
-	store.request = &protocol.MaintenanceRequest{Delivery: delivery, State: "pending"}
+	delivery := lifecyclev1.MaintenanceDelivery{Command: commandFixture(), OwnerID: fixtureOwner, Scope: scope}
+	store.request = &lifecyclev1.MaintenanceRequest{Delivery: delivery, State: "pending"}
 	routes := controlRoutes(control)
 	for _, tc := range []struct {
 		name, token string
@@ -333,18 +334,18 @@ func TestMaintenanceDaemonAndResultBinding(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name   string
-		edit   func(*protocol.MaintenanceResult)
+		edit   func(*lifecyclev1.MaintenanceResult)
 		status int
 	}{
-		{"valid", func(r *protocol.MaintenanceResult) {}, 200},
-		{"drain", func(r *protocol.MaintenanceResult) { r.Status.CompleteDrain = true }, 400},
-		{"wrong-host", func(r *protocol.MaintenanceResult) { r.Status.Host = "other" }, 400},
-		{"wrong-owner", func(r *protocol.MaintenanceResult) { r.Delivery.OwnerID = fixtureOther }, 403},
-		{"wrong-scope", func(r *protocol.MaintenanceResult) { r.Delivery.Scope = strings.Repeat("a", 64) }, 400},
-		{"wrong-id", func(r *protocol.MaintenanceResult) { r.Delivery.Command.ID = fixtureOther }, 400},
+		{"valid", func(r *lifecyclev1.MaintenanceResult) {}, 200},
+		{"drain", func(r *lifecyclev1.MaintenanceResult) { r.Status.CompleteDrain = true }, 400},
+		{"wrong-host", func(r *lifecyclev1.MaintenanceResult) { r.Status.Host = "other" }, 400},
+		{"wrong-owner", func(r *lifecyclev1.MaintenanceResult) { r.Delivery.OwnerID = fixtureOther }, 403},
+		{"wrong-scope", func(r *lifecyclev1.MaintenanceResult) { r.Delivery.Scope = strings.Repeat("a", 64) }, 400},
+		{"wrong-id", func(r *lifecyclev1.MaintenanceResult) { r.Delivery.Command.ID = fixtureOther }, 400},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result := protocol.MaintenanceResult{Delivery: delivery, Code: "ok", Status: protocol.MaintenanceStatus{
+			result := lifecyclev1.MaintenanceResult{Delivery: delivery, Code: "ok", Status: lifecyclev1.MaintenanceStatus{
 				Host: delivery.Command.Host, Profile: delivery.Command.Profile, ObservedAt: time.Now().UTC(),
 			}}
 			tc.edit(&result)

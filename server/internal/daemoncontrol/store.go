@@ -8,18 +8,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	lifecyclev1 "github.com/multica-ai/multica/server/pkg/lifecycle/v1"
 	"github.com/redis/go-redis/v9"
 )
 
 var ErrConflict = errors.New("maintenance request conflicts with existing state")
 
 type Store interface {
-	Create(context.Context, protocol.MaintenanceDelivery) (*protocol.MaintenanceRequest, error)
-	Get(context.Context, string) (*protocol.MaintenanceRequest, error)
-	Pending(context.Context, string) (*protocol.MaintenanceRequest, error)
-	Deliver(context.Context, protocol.MaintenanceDelivery) (bool, error)
-	Complete(context.Context, protocol.MaintenanceResult) error
+	Create(context.Context, lifecyclev1.MaintenanceDelivery) (*lifecyclev1.MaintenanceRequest, error)
+	Get(context.Context, string) (*lifecyclev1.MaintenanceRequest, error)
+	Pending(context.Context, string) (*lifecyclev1.MaintenanceRequest, error)
+	Deliver(context.Context, lifecyclev1.MaintenanceDelivery) (bool, error)
+	Complete(context.Context, lifecyclev1.MaintenanceResult) error
 }
 
 // Delivery is at most once. A lost claim response is indeterminate, not a
@@ -43,7 +43,7 @@ redis.call('SET', KEYS[2], ARGV[2], 'PX', ARGV[3])
 return 1
 `)
 
-func (s *RedisStore) Create(ctx context.Context, delivery protocol.MaintenanceDelivery) (*protocol.MaintenanceRequest, error) {
+func (s *RedisStore) Create(ctx context.Context, delivery lifecyclev1.MaintenanceDelivery) (*lifecyclev1.MaintenanceRequest, error) {
 	payload, err := json.Marshal(delivery)
 	if err != nil {
 		return nil, err
@@ -63,7 +63,7 @@ func (s *RedisStore) Create(ctx context.Context, delivery protocol.MaintenanceDe
 	return s.Get(ctx, delivery.Command.ID)
 }
 
-func (s *RedisStore) Get(ctx context.Context, id string) (*protocol.MaintenanceRequest, error) {
+func (s *RedisStore) Get(ctx context.Context, id string) (*lifecyclev1.MaintenanceRequest, error) {
 	values, err := s.client.HGetAll(ctx, requestKey(id)).Result()
 	if err != nil {
 		return nil, err
@@ -71,8 +71,8 @@ func (s *RedisStore) Get(ctx context.Context, id string) (*protocol.MaintenanceR
 	if len(values) == 0 {
 		return nil, nil
 	}
-	var request protocol.MaintenanceRequest
-	if err := protocol.DecodeMaintenanceJSON(strings.NewReader(values["delivery"]), &request.Delivery); err != nil {
+	var request lifecyclev1.MaintenanceRequest
+	if err := lifecyclev1.DecodeMaintenanceJSON(strings.NewReader(values["delivery"]), &request.Delivery); err != nil {
 		return nil, fmt.Errorf("invalid persisted maintenance command: %w", err)
 	}
 	request.State = values["state"]
@@ -80,8 +80,8 @@ func (s *RedisStore) Get(ctx context.Context, id string) (*protocol.MaintenanceR
 		return nil, errors.New("invalid maintenance request state")
 	}
 	if request.State == "completed" {
-		var result protocol.MaintenanceResult
-		if err := protocol.DecodeMaintenanceJSON(strings.NewReader(values["result"]), &result); err != nil {
+		var result lifecyclev1.MaintenanceResult
+		if err := lifecyclev1.DecodeMaintenanceJSON(strings.NewReader(values["result"]), &result); err != nil {
 			return nil, err
 		}
 		request.Result = &result
@@ -98,7 +98,7 @@ func (s *RedisStore) Get(ctx context.Context, id string) (*protocol.MaintenanceR
 	return &request, nil
 }
 
-func (s *RedisStore) Pending(ctx context.Context, daemonID string) (*protocol.MaintenanceRequest, error) {
+func (s *RedisStore) Pending(ctx context.Context, daemonID string) (*lifecyclev1.MaintenanceRequest, error) {
 	id, err := s.client.Get(ctx, activeKey(daemonID)).Result()
 	if errors.Is(err, redis.Nil) {
 		return nil, nil
@@ -120,7 +120,7 @@ redis.call('HSET', KEYS[1], 'state', 'delivered')
 return 1
 `)
 
-func (s *RedisStore) Deliver(ctx context.Context, delivery protocol.MaintenanceDelivery) (bool, error) {
+func (s *RedisStore) Deliver(ctx context.Context, delivery lifecyclev1.MaintenanceDelivery) (bool, error) {
 	payload, err := json.Marshal(delivery)
 	if err != nil {
 		return false, err
@@ -148,7 +148,7 @@ if redis.call('GET', KEYS[2]) == ARGV[3] then redis.call('DEL', KEYS[2]) end
 return 1
 `)
 
-func (s *RedisStore) Complete(ctx context.Context, result protocol.MaintenanceResult) error {
+func (s *RedisStore) Complete(ctx context.Context, result lifecyclev1.MaintenanceResult) error {
 	delivery, err := json.Marshal(result.Delivery)
 	if err != nil {
 		return err

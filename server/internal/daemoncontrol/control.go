@@ -19,7 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	lifecyclev1 "github.com/multica-ai/multica/server/pkg/lifecycle/v1"
 )
 
 type Directory interface {
@@ -67,7 +67,7 @@ func (c *Control) decode(w http.ResponseWriter, r *http.Request, target any) boo
 		c.unavailable(w, fmt.Errorf("maintenance body deadline unavailable: %w", err))
 		return false
 	}
-	if err := protocol.DecodeMaintenanceJSON(r.Body, target); err != nil {
+	if err := lifecyclev1.DecodeMaintenanceJSON(r.Body, target); err != nil {
 		failure(w, http.StatusBadRequest, "invalid_maintenance_message")
 		return false
 	}
@@ -184,7 +184,7 @@ func (c *Control) Submit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var command protocol.MaintenanceCommand
+	var command lifecyclev1.MaintenanceCommand
 	if !c.decode(w, r, &command) {
 		return
 	}
@@ -192,7 +192,7 @@ func (c *Control) Submit(w http.ResponseWriter, r *http.Request) {
 		failure(w, http.StatusBadRequest, "invalid_maintenance_command")
 		return
 	}
-	request, err := c.store.Create(r.Context(), protocol.MaintenanceDelivery{Command: command, OwnerID: owner, Scope: scope})
+	request, err := c.store.Create(r.Context(), lifecyclev1.MaintenanceDelivery{Command: command, OwnerID: owner, Scope: scope})
 	if errors.Is(err, ErrConflict) {
 		failure(w, http.StatusConflict, "maintenance_command_conflict")
 		return
@@ -202,6 +202,38 @@ func (c *Control) Submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, http.StatusAccepted, request)
+}
+
+func (c *Control) Capabilities(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+	owner, ok := c.human(w, r)
+	if !ok {
+		return
+	}
+	rt, ok := c.runtime(w, r)
+	if !ok {
+		return
+	}
+	scope, ok := c.authorizeOwner(w, r, rt, owner)
+	if !ok {
+		return
+	}
+	backend := lifecyclev1.CoverageUnsupported
+	if store, ok := c.store.(*fencedStore); ok && store.Store != nil && store.admission != nil {
+		backend = lifecyclev1.CoverageSupported
+	}
+	result := lifecyclev1.MaintenanceCapabilities{
+		Contract: lifecyclev1.Contract, DaemonID: rt.DaemonID.String, Scope: scope,
+		BodyLimit: lifecyclev1.MaintenanceBodyLimit, BackendAdmission: backend,
+		DaemonAdmission: lifecyclev1.CoverageUnknown, SupervisorLaunch: lifecyclev1.CoverageUnsupported,
+	}
+	if err := result.Validate(); err != nil {
+		c.unavailable(w, err)
+		return
+	}
+	respond(w, http.StatusOK, result)
 }
 
 func (c *Control) Get(w http.ResponseWriter, r *http.Request) {
@@ -310,7 +342,7 @@ func (c *Control) Report(w http.ResponseWriter, r *http.Request) {
 	if !ok || !c.daemon(w, r, rt, util.UUIDToString(rt.OwnerID)) {
 		return
 	}
-	var result protocol.MaintenanceResult
+	var result lifecyclev1.MaintenanceResult
 	if !c.decode(w, r, &result) {
 		return
 	}
@@ -335,5 +367,5 @@ func (c *Control) Report(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	respond(w, http.StatusOK, protocol.MaintenanceAcknowledgment{ID: command.ID, Accepted: true})
+	respond(w, http.StatusOK, lifecyclev1.MaintenanceAcknowledgment{ID: command.ID, Accepted: true})
 }

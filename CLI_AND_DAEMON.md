@@ -68,6 +68,12 @@ It is unavailable inside managed tasks and has no local authentication bypass.
 See [daemon admission and recovery](docs/runtime-lifecycle/DAEMON-ADMISSION.md)
 for approved authority, durable replay and remaining production gates.
 
+`runtime maintenance capabilities <runtime-uuid>` performs a read-only
+exact-owner discovery using `multica-lifecycle/v1`. It describes this backend's
+configured fence; daemon coverage remains unknown and supervisor launch is
+unsupported. It is not a readiness check, launch permit or fleet-wide drain
+attestation. The optional external package is never required for ordinary work.
+
 From an authorized owner terminal, after separate live-maintenance approval:
 
 ```powershell

@@ -11,15 +11,15 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	lifecyclev1 "github.com/multica-ai/multica/server/pkg/lifecycle/v1"
 )
 
 // Admission is a complementary server reservation fence, not a qualified
 // external maintenance authority or proof that the daemon has drained.
 type Admission interface {
-	Prepare(context.Context, protocol.MaintenanceDelivery) error
-	Check(context.Context, protocol.MaintenanceDelivery) error
-	Complete(context.Context, protocol.MaintenanceResult) error
+	Prepare(context.Context, lifecyclev1.MaintenanceDelivery) error
+	Check(context.Context, lifecyclev1.MaintenanceDelivery) error
+	Complete(context.Context, lifecyclev1.MaintenanceResult) error
 }
 
 type admissionTxStarter interface {
@@ -33,21 +33,21 @@ func NewPostgresAdmission(pool admissionTxStarter) *PostgresAdmission {
 }
 
 type admissionState struct {
-	Version    int                          `json:"version"`
-	Closed     bool                         `json:"closed"`
-	Generation uint64                       `json:"generation"`
-	Uncertain  bool                         `json:"uncertain"`
-	Delivery   protocol.MaintenanceDelivery `json:"delivery"`
-	Result     *protocol.MaintenanceResult  `json:"result"`
+	Version    int                             `json:"version"`
+	Closed     bool                            `json:"closed"`
+	Generation uint64                          `json:"generation"`
+	Uncertain  bool                            `json:"uncertain"`
+	Delivery   lifecyclev1.MaintenanceDelivery `json:"delivery"`
+	Result     *lifecyclev1.MaintenanceResult  `json:"result"`
 }
 
-func (s *admissionState) sameTarget(d protocol.MaintenanceDelivery) bool {
+func (s *admissionState) sameTarget(d lifecyclev1.MaintenanceDelivery) bool {
 	a, b := s.Delivery, d
 	return a.OwnerID == b.OwnerID && a.Command.DaemonID == b.Command.DaemonID &&
 		a.Command.Host == b.Command.Host && a.Command.Profile == b.Command.Profile
 }
 
-func (s *admissionState) prepare(d protocol.MaintenanceDelivery, now time.Time) error {
+func (s *admissionState) prepare(d lifecyclev1.MaintenanceDelivery, now time.Time) error {
 	c := d.Command
 	if !s.sameTarget(d) {
 		// An unconfirmed/mistargeted intent must not permanently poison this
@@ -91,7 +91,7 @@ func (s *admissionState) prepare(d protocol.MaintenanceDelivery, now time.Time) 
 	return nil
 }
 
-func (s *admissionState) complete(r protocol.MaintenanceResult) error {
+func (s *admissionState) complete(r lifecyclev1.MaintenanceResult) error {
 	if s.Delivery != r.Delivery {
 		return ErrConflict
 	}
@@ -122,8 +122,8 @@ func (s *admissionState) complete(r protocol.MaintenanceResult) error {
 	return nil
 }
 
-func (p *PostgresAdmission) update(ctx context.Context, d protocol.MaintenanceDelivery, fn func(*admissionState) error, create, write bool) error {
-	if err := (protocol.MaintenanceRequest{Delivery: d, State: "pending"}).Validate(); err != nil {
+func (p *PostgresAdmission) update(ctx context.Context, d lifecyclev1.MaintenanceDelivery, fn func(*admissionState) error, create, write bool) error {
+	if err := (lifecyclev1.MaintenanceRequest{Delivery: d, State: "pending"}).Validate(); err != nil {
 		return err
 	}
 	if p.pool == nil {
@@ -158,10 +158,10 @@ func (p *PostgresAdmission) update(ctx context.Context, d protocol.MaintenanceDe
 	} else if err != nil {
 		return err
 	} else {
-		if err := protocol.DecodeMaintenanceJSON(bytes.NewReader(data), &state); err != nil {
+		if err := lifecyclev1.DecodeMaintenanceJSON(bytes.NewReader(data), &state); err != nil {
 			return fmt.Errorf("decode server maintenance fence: %w", err)
 		}
-		if state.Version != 1 || (protocol.MaintenanceRequest{Delivery: state.Delivery, State: "pending"}).Validate() != nil ||
+		if state.Version != 1 || (lifecyclev1.MaintenanceRequest{Delivery: state.Delivery, State: "pending"}).Validate() != nil ||
 			(state.Result != nil && (state.Result.Delivery != state.Delivery || state.Result.Validate() != nil)) ||
 			(!state.Closed && (state.Uncertain || state.Result == nil || state.Result.Code != "ok" || state.Delivery.Command.Operation != "release")) {
 			return errors.New("invalid server maintenance fence")
@@ -186,10 +186,10 @@ func (p *PostgresAdmission) update(ctx context.Context, d protocol.MaintenanceDe
 	return tx.Commit(ctx)
 }
 
-func (p *PostgresAdmission) Prepare(ctx context.Context, d protocol.MaintenanceDelivery) error {
+func (p *PostgresAdmission) Prepare(ctx context.Context, d lifecyclev1.MaintenanceDelivery) error {
 	return p.update(ctx, d, func(s *admissionState) error { return s.prepare(d, time.Now()) }, true, true)
 }
-func (p *PostgresAdmission) Check(ctx context.Context, d protocol.MaintenanceDelivery) error {
+func (p *PostgresAdmission) Check(ctx context.Context, d lifecyclev1.MaintenanceDelivery) error {
 	return p.update(ctx, d, func(s *admissionState) error {
 		if !s.Closed || s.Delivery != d || s.Result != nil {
 			return ErrConflict
@@ -197,7 +197,7 @@ func (p *PostgresAdmission) Check(ctx context.Context, d protocol.MaintenanceDel
 		return nil
 	}, false, false)
 }
-func (p *PostgresAdmission) Complete(ctx context.Context, r protocol.MaintenanceResult) error {
+func (p *PostgresAdmission) Complete(ctx context.Context, r lifecyclev1.MaintenanceResult) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}
@@ -213,7 +213,7 @@ func NewFencedStore(store Store, admission Admission) Store {
 	return &fencedStore{Store: store, admission: admission}
 }
 
-func (s *fencedStore) Create(ctx context.Context, d protocol.MaintenanceDelivery) (*protocol.MaintenanceRequest, error) {
+func (s *fencedStore) Create(ctx context.Context, d lifecyclev1.MaintenanceDelivery) (*lifecyclev1.MaintenanceRequest, error) {
 	if s.Store == nil || s.admission == nil {
 		return nil, errors.New("maintenance delivery/admission store missing")
 	}
@@ -223,13 +223,13 @@ func (s *fencedStore) Create(ctx context.Context, d protocol.MaintenanceDelivery
 	// Failed or conflicting delivery storage never undoes the persisted fence.
 	return s.Store.Create(ctx, d)
 }
-func (s *fencedStore) Deliver(ctx context.Context, d protocol.MaintenanceDelivery) (bool, error) {
+func (s *fencedStore) Deliver(ctx context.Context, d lifecyclev1.MaintenanceDelivery) (bool, error) {
 	if err := s.admission.Check(ctx, d); err != nil {
 		return false, err
 	}
 	return s.Store.Deliver(ctx, d)
 }
-func (s *fencedStore) Complete(ctx context.Context, r protocol.MaintenanceResult) error {
+func (s *fencedStore) Complete(ctx context.Context, r lifecyclev1.MaintenanceResult) error {
 	// Validate the Redis request binding before the repository can reopen.
 	request, err := s.Store.Get(ctx, r.Delivery.Command.ID)
 	if err != nil {

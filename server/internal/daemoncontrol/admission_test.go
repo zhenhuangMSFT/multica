@@ -9,28 +9,28 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	lifecyclev1 "github.com/multica-ai/multica/server/pkg/lifecycle/v1"
 )
 
-func admissionDelivery(operation string, generation uint64) protocol.MaintenanceDelivery {
+func admissionDelivery(operation string, generation uint64) lifecyclev1.MaintenanceDelivery {
 	c := commandFixture()
 	c.ID, c.Operation, c.Generation = uuid.NewString(), operation, generation
 	c.Holder = "fixture-holder"
 	if operation == "acquire" || operation == "recover" {
 		c.ExpiresAt = c.IssuedAt.Add(time.Hour)
 	}
-	return protocol.MaintenanceDelivery{Command: c, OwnerID: fixtureOwner, Scope: strings.Repeat("a", 64)}
+	return lifecyclev1.MaintenanceDelivery{Command: c, OwnerID: fixtureOwner, Scope: strings.Repeat("a", 64)}
 }
 
-func admissionResult(d protocol.MaintenanceDelivery) protocol.MaintenanceResult {
+func admissionResult(d lifecyclev1.MaintenanceDelivery) lifecyclev1.MaintenanceResult {
 	c := d.Command
-	s := protocol.MaintenanceStatus{ObservedAt: time.Now().UTC(), Host: c.Host, Profile: c.Profile,
+	s := lifecyclev1.MaintenanceStatus{ObservedAt: time.Now().UTC(), Host: c.Host, Profile: c.Profile,
 		Generation: c.Generation, Blocked: c.Operation != "release"}
 	if s.Blocked {
 		s.Generation++
 		s.Holder, s.ExpiresAt = c.Holder, c.ExpiresAt
 	}
-	return protocol.MaintenanceResult{Delivery: d, Code: "ok", Status: s}
+	return lifecyclev1.MaintenanceResult{Delivery: d, Code: "ok", Status: s}
 }
 
 func confirmedAdmission() admissionState {
@@ -102,7 +102,7 @@ func TestMaintenanceAdmissionTransitions(t *testing.T) {
 		}
 	})
 	t.Run("uncertain generations cannot jump or release", func(t *testing.T) {
-		for _, d := range []protocol.MaintenanceDelivery{admissionDelivery("recover", 3), admissionDelivery("release", 1)} {
+		for _, d := range []lifecyclev1.MaintenanceDelivery{admissionDelivery("recover", 3), admissionDelivery("release", 1)} {
 			s := confirmedAdmission()
 			s.Uncertain, s.Result = true, nil
 			s.Delivery.Command.IssuedAt = now.Add(-6 * time.Minute)
@@ -186,15 +186,15 @@ type admissionSpy struct {
 	err                          error
 }
 
-func (s *admissionSpy) Prepare(context.Context, protocol.MaintenanceDelivery) error {
+func (s *admissionSpy) Prepare(context.Context, lifecyclev1.MaintenanceDelivery) error {
 	s.prepared++
 	return s.err
 }
-func (s *admissionSpy) Check(context.Context, protocol.MaintenanceDelivery) error {
+func (s *admissionSpy) Check(context.Context, lifecyclev1.MaintenanceDelivery) error {
 	s.checked++
 	return s.err
 }
-func (s *admissionSpy) Complete(context.Context, protocol.MaintenanceResult) error {
+func (s *admissionSpy) Complete(context.Context, lifecyclev1.MaintenanceResult) error {
 	s.completed++
 	return s.err
 }
@@ -221,7 +221,7 @@ func TestMaintenanceFencedStoreFailures(t *testing.T) {
 		t.Fatal("result acceptance bypassed unavailable request binding")
 	}
 	backend.err = nil
-	backend.request = &protocol.MaintenanceRequest{Delivery: d, State: "pending"}
+	backend.request = &lifecyclev1.MaintenanceRequest{Delivery: d, State: "pending"}
 	if !errors.Is(store.Complete(ctx, r), ErrConflict) || repository.completed != 0 {
 		t.Fatal("an undelivered command result reached admission")
 	}

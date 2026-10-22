@@ -21,7 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	lifecyclev1 "github.com/multica-ai/multica/server/pkg/lifecycle/v1"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -107,7 +107,7 @@ type maintenanceFixture struct {
 	fixtures []*testutil.Fixture
 	runtimes []pgtype.UUID
 	agents   []string
-	delivery protocol.MaintenanceDelivery
+	delivery lifecyclev1.MaintenanceDelivery
 }
 
 func newMaintenanceFixture(t *testing.T) *maintenanceFixture {
@@ -132,9 +132,9 @@ func newMaintenanceFixture(t *testing.T) *maintenanceFixture {
 	sort.Strings(parts)
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\n")))
 	now := time.Now().UTC()
-	f.delivery = protocol.MaintenanceDelivery{
+	f.delivery = lifecyclev1.MaintenanceDelivery{
 		OwnerID: user, Scope: hex.EncodeToString(sum[:]),
-		Command: protocol.MaintenanceCommand{ID: uuid.NewString(), Operation: "acquire", DaemonID: daemon,
+		Command: lifecyclev1.MaintenanceCommand{ID: uuid.NewString(), Operation: "acquire", DaemonID: daemon,
 			Host: "fixture-host", Profile: "fixture", Holder: "fixture-holder", IssuedAt: now, ExpiresAt: now.Add(time.Hour)},
 	}
 	root.Cleanup(t, `DELETE FROM daemon_maintenance_admission WHERE daemon_id=$1`, daemon)
@@ -151,13 +151,13 @@ func (f *maintenanceFixture) task(t *testing.T, runtime int, over testutil.Cols)
 	return f.fixtures[runtime].Task(t, f.agents[runtime], cols)
 }
 
-func (f *maintenanceFixture) result(d protocol.MaintenanceDelivery) protocol.MaintenanceResult {
+func (f *maintenanceFixture) result(d lifecyclev1.MaintenanceDelivery) lifecyclev1.MaintenanceResult {
 	c := d.Command
-	status := protocol.MaintenanceStatus{ObservedAt: time.Now().UTC(), Host: c.Host, Profile: c.Profile, Generation: c.Generation}
+	status := lifecyclev1.MaintenanceStatus{ObservedAt: time.Now().UTC(), Host: c.Host, Profile: c.Profile, Generation: c.Generation}
 	if c.Operation != "release" {
 		status.Blocked, status.Generation, status.Holder, status.ExpiresAt = true, c.Generation+1, c.Holder, c.ExpiresAt
 	}
-	return protocol.MaintenanceResult{Delivery: d, Code: "ok", Status: status}
+	return lifecyclev1.MaintenanceResult{Delivery: d, Code: "ok", Status: status}
 }
 
 func (f *maintenanceFixture) release(t *testing.T) {

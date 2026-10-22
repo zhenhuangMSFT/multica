@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	lifecyclev1 "github.com/multica-ai/multica/server/pkg/lifecycle/v1"
 )
 
 func maintenanceControlFixture(t *testing.T) (*Daemon, *maintenanceFileStore, string) {
@@ -30,9 +30,9 @@ func maintenanceControlFixture(t *testing.T) (*Daemon, *maintenanceFileStore, st
 	return d, store, dir
 }
 
-func maintenanceDelivery(operation string, generation uint64) protocol.MaintenanceDelivery {
+func maintenanceDelivery(operation string, generation uint64) lifecyclev1.MaintenanceDelivery {
 	now := time.Now().UTC()
-	command := protocol.MaintenanceCommand{ID: uuid.NewString(), DaemonID: "fixture-daemon", Host: "fixture-host",
+	command := lifecyclev1.MaintenanceCommand{ID: uuid.NewString(), DaemonID: "fixture-daemon", Host: "fixture-host",
 		Profile: "fixture", Operation: operation, Generation: generation, IssuedAt: now}
 	if operation != "status" {
 		command.Holder = "executor"
@@ -40,7 +40,7 @@ func maintenanceDelivery(operation string, generation uint64) protocol.Maintenan
 	if operation == "acquire" || operation == "recover" {
 		command.ExpiresAt = now.Add(time.Hour)
 	}
-	return protocol.MaintenanceDelivery{Command: command, OwnerID: "22222222-2222-4222-8222-222222222222", Scope: strings.Repeat("a", 64)}
+	return lifecyclev1.MaintenanceDelivery{Command: command, OwnerID: "22222222-2222-4222-8222-222222222222", Scope: strings.Repeat("a", 64)}
 }
 
 func TestMaintenanceControlDurableReplayAndStaleRelease(t *testing.T) {
@@ -155,14 +155,14 @@ func TestMaintenanceControlCrashWithUnresolvedIntent(t *testing.T) {
 func TestMaintenanceControlInputAndPersistenceFailure(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		edit func(*protocol.MaintenanceDelivery)
+		edit func(*lifecyclev1.MaintenanceDelivery)
 	}{
-		{"host", func(d *protocol.MaintenanceDelivery) { d.Command.Host = "other" }},
-		{"profile", func(d *protocol.MaintenanceDelivery) { d.Command.Profile = "other" }},
-		{"daemon", func(d *protocol.MaintenanceDelivery) { d.Command.DaemonID = "other" }},
-		{"owner", func(d *protocol.MaintenanceDelivery) { d.OwnerID = "not-a-uuid" }},
-		{"scope", func(d *protocol.MaintenanceDelivery) { d.Scope = "" }},
-		{"expired-command", func(d *protocol.MaintenanceDelivery) { d.Command.IssuedAt = time.Now().Add(-3 * time.Minute) }},
+		{"host", func(d *lifecyclev1.MaintenanceDelivery) { d.Command.Host = "other" }},
+		{"profile", func(d *lifecyclev1.MaintenanceDelivery) { d.Command.Profile = "other" }},
+		{"daemon", func(d *lifecyclev1.MaintenanceDelivery) { d.Command.DaemonID = "other" }},
+		{"owner", func(d *lifecyclev1.MaintenanceDelivery) { d.OwnerID = "not-a-uuid" }},
+		{"scope", func(d *lifecyclev1.MaintenanceDelivery) { d.Scope = "" }},
+		{"expired-command", func(d *lifecyclev1.MaintenanceDelivery) { d.Command.IssuedAt = time.Now().Add(-3 * time.Minute) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d, _, _ := maintenanceControlFixture(t)
@@ -210,11 +210,11 @@ func TestMaintenanceControlPollBoundedAndBackendOutage(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(delivery)
 		} else {
 			reports.Add(1)
-			var result protocol.MaintenanceResult
-			if err := protocol.DecodeMaintenanceJSON(r.Body, &result); err != nil || result.Validate() != nil || result.Code != "ok" {
+			var result lifecyclev1.MaintenanceResult
+			if err := lifecyclev1.DecodeMaintenanceJSON(r.Body, &result); err != nil || result.Validate() != nil || result.Code != "ok" {
 				t.Errorf("%+v %v", result, err)
 			}
-			_ = json.NewEncoder(w).Encode(protocol.MaintenanceAcknowledgment{ID: delivery.Command.ID, Accepted: true})
+			_ = json.NewEncoder(w).Encode(lifecyclev1.MaintenanceAcknowledgment{ID: delivery.Command.ID, Accepted: true})
 		}
 	}))
 	d.client = NewClient(server.URL)

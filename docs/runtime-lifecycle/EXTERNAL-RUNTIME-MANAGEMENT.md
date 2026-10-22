@@ -147,21 +147,25 @@ Action API remains unchanged in this proposal.
 
 ## Versioned interfaces and authorization flow
 
-Proposed external contract is `runtime-manager/v1`; proposed minimal core hook
-profile is `multica-lifecycle/v1`. Neither name is an implemented route/version
-today. Publish JSON schemas and a language-neutral conformance fixture corpus
-in the external repository, with the core hook's DTO subset owned/versioned by
-Multica. No dependency on private Go packages.
+Proposed external executor contract remains `runtime-manager/v1`, not an
+implemented privileged service. The generic core contract is now implemented
+as `multica-lifecycle/v1`, with public DTOs and strict decoding in
+`server/pkg/lifecycle/v1`. Existing wire bytes are preserved; no internal alias,
+dual write or persistence migration is needed. The core owns/version-controls
+these DTOs; the external package has no dependency on private Go packages.
 
 The current prototype maps human operations to
 `POST /api/runtimes/{runtimeId}/maintenance` and bounded result reads to
 `GET /api/runtimes/{runtimeId}/maintenance/{requestId}`. Existing daemon
 `maintenance/claim` and `maintenance/{requestId}/result` delivery routes are
 daemon-authenticated, not grants to the external executor. Reuse those
-state-owner operations after contract review; define a separately authenticated
-capability read and external participant binding only if approved. Do not
-present proposed `v1` names as already callable endpoints or repurpose daemon
-credentials for the manager.
+state-owner operations. `GET /api/runtimes/{runtimeId}/maintenance/capabilities`
+and `runtime maintenance capabilities` now expose the v1 ID with the same
+human exact-owner authorization. This backend reports its configured reservation
+fence only; remote daemon coverage is unknown and supervisor launch unsupported.
+External participant binding/enrollment is still unimplemented. Do not repurpose
+daemon credentials for the manager or treat discovery as a permission/readiness
+attestation.
 
 - Capability response: supported major/minor, enforcement features, participant
   incarnation, immutable scope binding, observation time/deadline and coverage
