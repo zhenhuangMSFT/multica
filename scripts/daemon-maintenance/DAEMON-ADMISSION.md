@@ -50,6 +50,60 @@ retains its credentials or reads a newer state, cannot release another holder.
 This is an internal concurrency contract; authenticated control authorization
 and a real external monotonic fencing service are still absent.
 
+## Owner control transport decision (not implemented)
+
+The existing local daemon listener does **not** authenticate an owner principal:
+
+| Existing surface | Actual boundary | Why it cannot authorize maintenance |
+| --- | --- | --- |
+| `internal/daemon/health.go`: `serveHealth`, `shutdownHandler` | Loopback HTTP; health/status and shutdown do not establish a calling owner identity. | Loopback origin, PID, host/profile fields and a matching health response are not authentication. Do not copy this mutation pattern. |
+| `health.go`: `activeRepoCheckoutTask` | Bearer mapped to an active managed task. | This deliberately authenticates the identities maintenance must reject, not a human operator. |
+| `cmd/multica/cmd_agent.go`: `requireHumanLocalCommand` | CLI environment/workdir task-context guard. | A caller can bypass the CLI and send HTTP directly; the guard is not server-side authentication. |
+| `internal/middleware/auth.go`: `Auth`, `internal/handler/actor_guards.go`: `RequireHumanActor` | Backend-validated user identity and machine-credential exclusion. | These are supported backend boundaries, but are not mounted in the local daemon and supply no existing authenticated owner-to-local-daemon maintenance transport. |
+| `internal/handler/runtime_update.go`: `InitiateUpdate`, `runtime.go`: `canEditRuntime` | Backend update command for a runtime owner **or workspace admin**. | Reusing update permission would silently grant a non-owner admin host/profile-wide maintenance authority; runtime/workspace scope is not automatically local profile scope. |
+
+The backend's human-only guard must follow real `Auth`; trusting incoming
+`X-User-ID`/`X-Actor-Source` headers in a local handler is not equivalent.
+Likewise, task-token prefixes or absent task environment variables cannot prove
+an owner's identity. Do not forward a saved owner API token to an unverified
+local listener, mint a shared file secret, or expose a placeholder maintenance
+endpoint to fill this gap.
+
+**Decision required before wiring status/acquire/recover/release:** choose the
+authority and transport for the receiving daemon, not just the CLI syntax.
+
+1. **Recommended: backend-mediated owner commands.** Reuse backend `Auth` and
+   `RequireHumanActor`, with exact runtime-owner equality (not the existing
+   owner-or-admin update permission), an explicit binding covering the entire
+   daemon/profile, and typed delivery/results over an authenticated daemon
+   channel. Approve the daemon-wide/multi-workspace ownership rule and behavior
+   when the backend is unavailable during recovery. Command IDs, replay/dedup,
+   target daemon/host/profile and holder/generation must survive ambiguous
+   delivery; an existing version-update request is not that protocol.
+2. **Alternative: a separately approved local owner control channel.** Specify
+   Windows named-pipe ACL/peer authentication and owner SID/profile binding,
+   client/server identity verification and credential lifetime. Decide whether
+   managed tasks running under the same Windows SID are explicitly in the
+   trusted OS boundary or require a separately isolated broker/credential.
+   Same-SID ACL access alone does not distinguish owner terminal from an agent
+   child. No such peer-authenticated transport is implemented in this checkout.
+
+These are design choices, not implemented alternatives or a request to broaden
+live access controls. Do not choose or deploy one by inference. Until approved,
+there is no `daemon maintenance` CLI command or local maintenance HTTP route;
+internal transition methods remain unexposed. This blocker is independent of
+the first-fence-write durability decision below.
+
+After that decision, verification must exercise the actual CLI-to-authorized
+receiver, not a mock that assumes `isOwner: true`: reject missing/invalid,
+managed-task and wrong-owner credentials before reading counts or state;
+validate host/profile, operation-specific holder/generation and strict bounded
+JSON; return sanitized counts and persistence/recovery reason codes without
+raw errors/paths/tokens; reject stale recovery/release and persistence faults;
+preserve `completeDrain: false`. Include transport replay/target checks and
+unauthenticated direct-call fixtures. No live acquisition is needed for those
+tests.
+
 ## Persistence and failure ordering
 
 The daemon's existing exclusive **profile process lock** is the only allowed
