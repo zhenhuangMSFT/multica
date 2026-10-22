@@ -22,6 +22,7 @@ owner credential forwarding.
 | `extensions/runtime-manager/scripts/devbox` | Guarded provisioning/registration preparation and offline config mapping; cloud writes require separate approval. |
 | `extensions/runtime-manager/scripts/windows-worker` | Guarded optional logon installer and existing direct-launch wrapper; not an atomic maintenance-aware supervisor. |
 | `extensions/runtime-manager/scripts/daemon-maintenance` | Pure lifecycle policy, read-only snapshots, simulation-only transactions, evidence validation and external executor design. |
+| `plugin` | Optional manifest-v1 offline sidebar UI: sanitized unavailable status, static plans and local proposal drafts. No service endpoint, grant, lifecycle action or installation implied. |
 
 Generic reservation/claim fencing and authenticated owner control remain with
 Multica's backend/daemon. The public core contract is
@@ -31,6 +32,12 @@ into this package. The independent Copilot correction is isolated in
 [PR #4](https://github.com/zhenhuangMSFT/multica/pull/4), commit `b0aa908d8`
 (only `server/pkg/agent/copilot.go` and its regression test). It is removed from
 PR #3's net diff, is not a manager dependency and needs no extension to run.
+
+The preview plugin source is optional and separately validated; it is not
+published/installed by the package runner or default builds. See
+[plugin limits and fixture tests](plugin/README.md). Manifest-v1's existing
+non-empty-scope requirement uses `storage:user`, but the preview performs no
+storage calls or other host actions.
 
 The approved external-service boundary does not approve a host executor's
 identity, privilege, credential enrollment or transport. That executor remains

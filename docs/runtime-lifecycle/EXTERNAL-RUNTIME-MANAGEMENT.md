@@ -42,6 +42,13 @@ external manager ---- versioned generic lifecycle API ---- Multica backend
 external executor --- narrow lifecycle participant ------- Multica daemon
 ```
 
+The optional manifest-v1 preview source now exists at
+`extensions/runtime-manager/plugin`. It renders missing/unavailable status,
+static prerequisite plans and local proposal drafts only. It has no service
+endpoint or hook and invokes no host action. Existing manifest-v1 validation
+requires a non-empty scope list, so it declares `storage:user` but makes no
+storage calls. Neither publishing nor installation is part of source preparation.
+
 The manager owns Dev Box provisioning/enrollment, cloud budget/pool policy,
 Windows logon/scheduler/service policy, tunnel mapping, source/artifact hashes,
 owner-session execution, process lineage/containment, readiness/canaries,
