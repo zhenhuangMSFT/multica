@@ -362,6 +362,26 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 
 	// The task prompt is delivered on stdin, never argv (see buildCopilotArgs).
 	args := buildCopilotArgs(opts, b.cfg.Logger)
+	var mcpConfigPath string
+	var mcpFileCleanup func()
+	if hasManagedMcpConfig(opts.McpConfig) {
+		path, err := writeMcpConfigToTemp(opts.McpConfig)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		mcpConfigPath = path
+		mcpFileCleanup = func() { cleanupMcpConfigTemp(mcpConfigPath) }
+		// Copilot augments its runtime-local servers; @ loads JSON from a file
+		// so credentials and large configurations never enter the command line.
+		args = append(args, "--additional-mcp-config", "@"+mcpConfigPath)
+	}
+	defer func() {
+		if mcpFileCleanup != nil {
+			mcpFileCleanup()
+		}
+	}()
+
 	cmd, _, _ := b.cfg.commandAt(execName).execVia(runCtx, chooseCopilotInvocation, lookedUp, args, b.cfg.Logger)
 	hideAgentWindow(cmd)
 	b.cfg.logAgentCommandWithPrompt(cmd, newAgentCommandLogArgs(args), len(prompt))
@@ -391,6 +411,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		cancel()
 		return nil, fmt.Errorf("start copilot: %w", err)
 	}
+	mcpFileCleanup = nil
 
 	// Write the prompt from its own goroutine so it cannot deadlock against the
 	// stdout reader: a prompt larger than the OS pipe buffer blocks mid-write
@@ -412,6 +433,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
+		defer cleanupMcpConfigTemp(mcpConfigPath)
 
 		startTime := time.Now()
 		seedModel := opts.Model
