@@ -223,6 +223,12 @@ remain production prerequisites. Symlink refusal is not an authenticated lease.
 
 ## Paths outside complete drain
 
+The [supervised-launch contract](SUPERVISOR-CONTROL.md) records the new
+host-executor authority/transport decision needed to fence process creation
+atomically. Existing maintenance status/delivery is not a launch permit.
+No supervisor adapter, wrapper installation or service identity is approved by
+the three existing daemon-control authority choices.
+
 | Path | Boundary |
 | --- | --- |
 | HTTP/WS batch claims | New intents rejected; already-issued requests finish and are counted. |

@@ -56,7 +56,15 @@ Proposed atomic, access-restricted per-component JSON health record: schemaVersi
 
 Component states: `waiting_signin` (external observer only), `waiting_dependency`, `starting`, `ready`, `degraded`, `reauth_required`, `maintenance`, `failed`, `stopped`. Do not equate adapter API-ready with provider readiness. Aggregate ready additionally requires exact running revision/settings, same runtime IDs with fresh heartbeats, expected process count and references to successful approved provider canaries/WebSocket wake verification. Preserve per-provider results and freshness. A wrapper that stops writing while its child lives is unknown, not healthy; automatic hung-child termination remains unimplemented. Raw child logs may contain sensitive data and require private retention/redaction review.
 
-Maintenance consumer interface: query an authenticated decision bound to host/profile, holder, generation and freshness; consult before initial child launch and each respawn. `held/draining` denies ordinary start, a specific canary allowance is narrowly scoped, and stale/unavailable/unknown decisions fail closed for new starts. Existing children are not cancelled by a query failure. Shared state must survive daemon restart, and the external executor must own stop/release decisions. This is a required interface contract, not a new CLI command or local lock implementation.
+Maintenance consumer interface: a status query followed by process start is
+insufficient. Launch/create/resume and maintenance closure need a common
+durable serializer and independently authenticated host executor, including
+while the daemon is stopped. See the
+[proposed supervised-launch authority/transport contract](../daemon-maintenance/SUPERVISOR-CONTROL.md)
+for the concrete decision, generation/epoch handshake, durable unknown-child
+outcomes, replacement exception and isolated acceptance matrix. It is not
+implemented or approved for installation. Existing children are not cancelled
+by query failure; no evidence boolean or wrapper flag authorizes replacement.
 
 ## Required follow-up tests and gates
 
