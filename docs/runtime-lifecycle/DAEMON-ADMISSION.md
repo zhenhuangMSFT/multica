@@ -2,8 +2,9 @@
 
 For the current external-service boundary, complete PR inventory and staged
 extraction plan, see [optional external runtime management](EXTERNAL-RUNTIME-MANAGEMENT.md).
-The implementation below is the existing draft prototype; this architecture
-revision has not refactored it or approved further fleet expansion in core.
+The implementation below is the generic core barrier. Fleet/OS source and tests
+have moved to the optional `extensions/runtime-manager` package; no host executor
+or fleet deployment policy is part of this core contract.
 
 `server/internal/daemon/maintenance_admission.go` extends the existing `claimMu`
 boundary with durable host/profile-bound holder/generation state. Backend-mediated
@@ -228,7 +229,7 @@ remain production prerequisites. Symlink refusal is not an authenticated lease.
 
 ## Paths outside complete drain
 
-The [supervised-launch contract](SUPERVISOR-CONTROL.md) records the new
+The [supervised-launch contract](../../extensions/runtime-manager/scripts/daemon-maintenance/SUPERVISOR-CONTROL.md) records the new
 host-executor authority/transport decision needed to fence process creation
 atomically. Existing maintenance status/delivery is not a launch permit.
 No supervisor adapter, wrapper installation or service identity is approved by

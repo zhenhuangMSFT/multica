@@ -191,7 +191,7 @@ canary finalization, full readiness aggregator, atomic health publisher or share
 drain/lease implementation is claimed. These remain engineering/qualification
 dependencies, not merely owner approvals.
 
-The [daemon admission increment](DAEMON-ADMISSION.md) now durably holds local
+The [daemon admission increment](https://github.com/zhenhuangMSFT/multica/blob/agent/multica-operator/4ba50ca7316e/docs/runtime-lifecycle/DAEMON-ADMISSION.md) now durably holds local
 batch claims at the existing mutex with explicit holder/generation recovery.
 It is not the complete shared drain/respawn boundary and does not enable worker
 Production transactions or convert these supplied maintenance records into leases.

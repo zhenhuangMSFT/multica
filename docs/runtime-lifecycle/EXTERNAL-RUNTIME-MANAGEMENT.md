@@ -1,12 +1,12 @@
 # Optional external runtime management: revised boundary
 
-**Architecture revision, not a refactor or installation.** Runtime reliability
+**Approved architecture; staged source extraction, not installation.** Runtime reliability
 and fleet policy belong in an optional, separately released external service,
 not Multica's backend, daemon or a new general plugin framework. A normal
 Multica plugin can provide its UI, request hooks and skills; it cannot host the
 privileged service or supply atomic lifecycle admission by itself.
 
-This revises the placement in [SUPERVISOR-CONTROL.md](SUPERVISOR-CONTROL.md):
+This revises the placement in [SUPERVISOR-CONTROL.md](../../extensions/runtime-manager/scripts/daemon-maintenance/SUPERVISOR-CONTROL.md):
 its launch serializer, journals, enrollment and OS executor belong to the
 external extension. Its host-identity/service/privilege proposal remains
 **unapproved**. The three approved backend choices remain: human-only exact
@@ -15,7 +15,15 @@ and backend-dependent mutation without an offline authentication bypass.
 
 ## Recommendation and dependency direction
 
-Use a separate `runtime-manager` product/repository (proposed name, not created)
+Use the isolated `extensions/runtime-manager` source package until a separate
+repository destination is selected. Its own `extension.json` version and explicit
+standalone fixture runner do not participate in core startup or default builds.
+The three fleet script trees and their tests have been physically extracted;
+generic admission and this boundary document live under `docs/runtime-lifecycle`.
+The independent Copilot correction remains isolated at `b0aa908d8`, a two-file
+commit with no fleet dependency. No remote repository or pipeline was created.
+
+The target remains a separate `runtime-manager` product/repository
 with its own semantic versions, signed OS packages, release manifest, contract
 fixtures and operator documentation:
 
@@ -80,9 +88,11 @@ privileged execution stays in a human-authorized manager workflow.
 
 Inventory baseline is merge base
 `c24204f5baea577e57ecdc5f3e034f685767ccf9`, head `b9c4cff35`: **70 changed
-files**. The rows below cover every file once, including tests and generated
-bindings. These are planned dispositions; existing implementation has not been
-moved, renamed, deleted or relabeled as a finished external extension.
+files**. The rows below are the historical pre-extraction inventory, covering
+every file once including tests and generated bindings. The three script trees
+have since moved under `extensions/runtime-manager/scripts`, except these two
+generic core documents under `docs/runtime-lifecycle`. Other dispositions remain
+review guidance; no finished privileged service is claimed.
 
 | Current PR file family | Revised ownership / refactor |
 | --- | --- |
@@ -255,11 +265,11 @@ hook changes are accepted.
 
 ## Migration/refactor plan, without executing it
 
-1. Accept the external boundary and select generic-hook versus zero-core
-   reliability tier. Freeze further OS/fleet expansion in core. Keep PR #3
-   draft; its current source is **not yet** the decoupled deliverable.
-2. In a separately authorized extraction, create the external repository/release
-   pipeline and move the three script trees with tests/history/license context.
+1. The owner accepted the external boundary with generic core hooks and source
+   extraction; the zero-core tier was not selected. Freeze OS/fleet expansion
+   in core and keep PR #3 draft. A working privileged service is not delivered.
+2. Source extraction into the local optional package is implemented. Select an
+   explicit destination before creating an external repository/release pipeline.
    Publish versioned manager/executor contracts and package digests; keep private
    host inventory/credentials out. Do not provision resources or enable CI/tasks
    merely to perform this design review.
@@ -285,7 +295,9 @@ hook changes are accepted.
 
 ## Isolated contract tests required before extraction acceptance
 
-These are **proposed**, not new tests run by this documentation revision.
+These are acceptance requirements. The current extraction supplies standalone
+offline fixture execution; privileged executor tests remain proposed until its
+authority is approved. Consult the extraction handoff for measured results.
 
 | Contract owner | Required isolated evidence |
 | --- | --- |

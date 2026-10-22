@@ -16,9 +16,9 @@ coding agents must not administer the daemon that hosts their task.
 
 | Input | Role and current boundary |
 | --- | --- |
-| `scripts/devbox/Invoke-MulticaDevBox.ps1` | Offline Plan; separately approved cloud Create; owner-side fresh-worker Prepare; registration Verify. Not a supervisor, updater or migration tool. |
-| `scripts/devbox/New-WorkerLogonConfig.ps1` | Offline mapping from validated bootstrap manifest to PILOT-18 installer JSON. No credentials, executable lookup, machine access or installation. |
-| `scripts/windows-worker` | Integrated logon installer/supervisor review source, including target-host and update/reload policy guards. Examples use synthetic identities; supply private approved per-host config separately. Not a production updater. |
+| `extensions/runtime-manager/scripts/devbox/Invoke-MulticaDevBox.ps1` | Offline Plan; separately approved cloud Create; owner-side fresh-worker Prepare; registration Verify. Not a supervisor, updater or migration tool. |
+| `extensions/runtime-manager/scripts/devbox/New-WorkerLogonConfig.ps1` | Offline mapping from validated bootstrap manifest to PILOT-18 installer JSON. No credentials, executable lookup, machine access or installation. |
+| `extensions/runtime-manager/scripts/windows-worker` | Integrated logon installer/supervisor review source, including target-host and update/reload policy guards. Examples use synthetic identities; supply private approved per-host config separately. Not a production updater. |
 | `Test-DaemonUpgradeEvidence.ps1` | Checks supplied evidence shape/gates only. It does not observe or implement drain, authorize work, or prove assertions. |
 | Existing server `MulticaPilot-*` tasks | Preserve server/daemon/tunnel sign-in configuration; do not run a replacement startup installer on this host. |
 
@@ -104,7 +104,7 @@ This interface is NOT implemented by a capacity setting, file lock or evidence
 boolean. Its complete product boundary is still required before live upgrade/retirement:
 
 The daemon's existing `claimMu`/`pauseClaims`/`claimsInFlight` barrier now includes
-[durable local admission ownership](DAEMON-ADMISSION.md): host/profile-bound
+[durable local admission ownership](https://github.com/zhenhuangMSFT/multica/blob/agent/multica-operator/4ba50ca7316e/docs/runtime-lifecycle/DAEMON-ADMISSION.md): host/profile-bound
 holder/generation transitions, explicit crash/expiry recovery and fail-closed
 local claim rejection. Clearing an auto-update barrier cannot release a
 maintenance holder. Backend-authenticated exact-owner `runtime maintenance`

@@ -1,7 +1,7 @@
 # Owned-task reconciliation and health interface proposal
 
 **Architecture placement:** the host policy, supervisor and deployment adapters
-below belong in the [optional external runtime-management extension](../daemon-maintenance/EXTERNAL-RUNTIME-MANAGEMENT.md),
+below belong in the [optional external runtime-management extension](https://github.com/zhenhuangMSFT/multica/blob/agent/multica-operator/4ba50ca7316e/docs/runtime-lifecycle/EXTERNAL-RUNTIME-MANAGEMENT.md),
 not core Multica. This is a refactor plan, not an installed service or an
 approved broker identity. Existing live after-sign-in startup is unchanged.
 

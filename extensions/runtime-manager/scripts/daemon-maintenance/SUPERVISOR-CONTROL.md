@@ -1,6 +1,6 @@
 # Supervised launch: proposed authority and transport contract
 
-**Revised placement:** [optional external runtime management](EXTERNAL-RUNTIME-MANAGEMENT.md)
+**Revised placement:** [optional external runtime management](https://github.com/zhenhuangMSFT/multica/blob/agent/multica-operator/4ba50ca7316e/docs/runtime-lifecycle/EXTERNAL-RUNTIME-MANAGEMENT.md)
 is the current architecture recommendation. The broker, OS policy, enrollment,
 deployment and journals proposed here belong to that separately versioned
 extension, not core Multica. This document's authority/privilege choices remain
@@ -17,11 +17,11 @@ installation, a service/account change, migration or live maintenance.
 
 | Source | Implemented behavior | Missing launch guarantee |
 | --- | --- | --- |
-| `scripts/windows-worker/Start-WorkerComponent.ps1` | Host/task guards, per-component file lock, duplicate-process/readiness checks, foreground child invocation. | No authenticated maintenance admission; process discovery followed by invocation is not atomic. Wrapper exit/crash has no durable child-creation receipt. |
-| `scripts/windows-worker/Install-WorkerLogon.ps1` | Separate root Tunnel/Daemon tasks; interactive owner logon, IgnoreNew, scheduler retries. | IgnoreNew covers a scheduler task instance, not another wrapper directory, task identity or orphaned child. Retries repeat the unfenced launch path. |
+| `extensions/runtime-manager/scripts/windows-worker/Start-WorkerComponent.ps1` | Host/task guards, per-component file lock, duplicate-process/readiness checks, foreground child invocation. | No authenticated maintenance admission; process discovery followed by invocation is not atomic. Wrapper exit/crash has no durable child-creation receipt. |
+| `extensions/runtime-manager/scripts/windows-worker/Install-WorkerLogon.ps1` | Separate root Tunnel/Daemon tasks; interactive owner logon, IgnoreNew, scheduler retries. | IgnoreNew covers a scheduler task instance, not another wrapper directory, task identity or orphaned child. Retries repeat the unfenced launch path. |
 | `server/internal/daemoncontrol/admission.go` | PostgreSQL transaction fence before delivery; bound owner/scope/generation and results. | Its transaction ends before an external process starts. No launch reservation/acknowledgment or independently authenticated host executor exists. |
 | `server/internal/daemon/maintenance_control.go` | Authenticated daemon polling and durable command intents/results. | The receiver must already be running. It cannot authorize its own first launch or supervise itself while stopped. |
-| `scripts/daemon-maintenance/WorkerSnapshot.psm1` | Read-only task/file and referenced child identity observations. | A snapshot is evidence, not a live process handle, protected provenance or authority to create a child. Unknown coverage remains unknown. |
+| `extensions/runtime-manager/scripts/daemon-maintenance/WorkerSnapshot.psm1` | Read-only task/file and referenced child identity observations. | A snapshot is evidence, not a live process handle, protected provenance or authority to create a child. Unknown coverage remains unknown. |
 
 Neither `runtime maintenance status`, `auth probe`, anonymous local health nor a
 receipt boolean is a launch permit. Copying a daemon or saved owner credential

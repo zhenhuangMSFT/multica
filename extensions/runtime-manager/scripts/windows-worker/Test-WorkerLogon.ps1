@@ -20,14 +20,22 @@ try {
     try { & $installer -ConfigPath $scratch | Out-Null } catch { $rejected = $_.Exception.Message -like '*simple identifier*' }
     if (-not $rejected) { throw 'Invalid profile accepted.' }
 } finally { if (Test-Path -LiteralPath $scratch) { Remove-Item -LiteralPath $scratch } }
-if ($env:MULTICA_TASK_ID -or $env:MULTICA_AGENT_ID -or $env:MULTICA_TASK_CONFIG_ROOT) {
+$priorTaskID = $env:MULTICA_TASK_ID
+try {
+    $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+    $config.DeviceName = [Environment]::MachineName
+    $config | ConvertTo-Json | Set-Content -LiteralPath $scratch
+    $env:MULTICA_TASK_ID = 'fixture-managed-task'
     $rejected = $false
-    try { & (Join-Path $PSScriptRoot 'Start-WorkerComponent.ps1') -ConfigPath $configPath -Component Tunnel } catch { $rejected = $_.Exception.Message -like '*managed agent task*' }
+    try { & (Join-Path $PSScriptRoot 'Start-WorkerComponent.ps1') -ConfigPath $scratch -Component Tunnel } catch { $rejected = $_.Exception.Message -like '*managed agent task*' }
     if (-not $rejected) { throw 'Managed-task supervisor guard failed.' }
     foreach ($mode in @('Install','Remove')) {
         $rejected = $false
-        try { & $installer -ConfigPath $configPath -Mode $mode | Out-Null } catch { $rejected = $_.Exception.Message -like '*managed agent task*' }
+        try { & $installer -ConfigPath $scratch -Mode $mode | Out-Null } catch { $rejected = $_.Exception.Message -like '*managed agent task*' }
         if (-not $rejected) { throw "Managed-task guard failed for $mode." }
     }
-} else { Write-Output 'Managed-task rejection checks skipped: not in a managed task.' }
-Write-Output 'PASS: syntax, logon-only plan, profile validation, applicable managed-task guards.'
+} finally {
+    $env:MULTICA_TASK_ID = $priorTaskID
+    if (Test-Path -LiteralPath $scratch) { Remove-Item -LiteralPath $scratch }
+}
+Write-Output 'PASS: syntax, logon-only plan, profile validation, deterministic managed-task guards.'

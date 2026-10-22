@@ -22,12 +22,12 @@ cp server/bin/multica /usr/local/bin/multica
 ### Update
 
 For a coordinated daemon binary rollout with drain, rollback and verification
-gates, see [Controlled daemon upgrades](scripts/daemon-maintenance/README.md).
+gates, see [Controlled daemon upgrades](extensions/runtime-manager/scripts/daemon-maintenance/README.md).
 An update request is not evidence that the running daemon changed revision.
 
 For a bounded owner-profile API check, use `multica --profile <name> auth probe`
 with explicit expected host, loopback endpoint, owner UUID and workspace UUID;
-see [worker lifecycle collection](scripts/daemon-maintenance/WORKER-LIFECYCLE.md).
+see [worker lifecycle collection](extensions/runtime-manager/scripts/daemon-maintenance/WORKER-LIFECYCLE.md).
 This checks authenticated API access, not tunnel/provider readiness or permission
 to start work, and is unavailable inside managed agent tasks.
 
@@ -65,7 +65,7 @@ When these variables are unset, the GitHub defaults remain unchanged.
 deployment or complete draining. It requires backend-authenticated human ownership
 of every affected runtime/workspace registration; admin status alone is insufficient.
 It is unavailable inside managed tasks and has no local authentication bypass.
-See [daemon admission and recovery](scripts/daemon-maintenance/DAEMON-ADMISSION.md)
+See [daemon admission and recovery](docs/runtime-lifecycle/DAEMON-ADMISSION.md)
 for approved authority, durable replay and remaining production gates.
 
 From an authorized owner terminal, after separate live-maintenance approval:
@@ -90,7 +90,7 @@ Expiry, backend loss and restart never authorize automatic release.
 ## Quick Start
 
 For controlled provisioning of additional Windows execution hosts (without another
-backend), see [Windows worker provisioning](scripts/devbox/README.md).
+backend), see [Windows worker provisioning](extensions/runtime-manager/scripts/devbox/README.md).
 
 ```bash
 # One-command setup: configure, authenticate, and start the daemon

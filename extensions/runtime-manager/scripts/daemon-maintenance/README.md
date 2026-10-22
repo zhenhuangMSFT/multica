@@ -1,6 +1,6 @@
 # Controlled daemon upgrades
 
-The current [external runtime-management architecture](EXTERNAL-RUNTIME-MANAGEMENT.md)
+The current [external runtime-management architecture](https://github.com/zhenhuangMSFT/multica/blob/agent/multica-operator/4ba50ca7316e/docs/runtime-lifecycle/EXTERNAL-RUNTIME-MANAGEMENT.md)
 separates optional fleet/OS policy from minimal generic core lifecycle hooks.
 The scripts here are draft extraction candidates, not an installed extension.
 
@@ -49,7 +49,7 @@ stopping the daemon from its own task would orphan the task and its final report
 | Close | Record timestamps, hashes, before/after identities, verification results, rollback availability and unresolved limitations. Rollout remains incomplete if any gate is unproven. |
 
 The current CLI has no qualified general-purpose drain command in this workflow.
-The [durable local daemon admission boundary](DAEMON-ADMISSION.md) includes a
+The [durable local daemon admission boundary](https://github.com/zhenhuangMSFT/multica/blob/agent/multica-operator/4ba50ca7316e/docs/runtime-lifecycle/DAEMON-ADMISSION.md) includes a
 backend-authenticated exact-owner `runtime maintenance` control surface.
 It gates local claims only, not external writers or the full drain sequence.
 Do not substitute `max_concurrent_tasks`, a status snapshot, a comment saying
