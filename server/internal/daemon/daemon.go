@@ -676,10 +676,13 @@ type Daemon struct {
 	// or any task is in handleTask. Together that closes the fetch-then-claim
 	// race where a new task slipping in during the release-metadata fetch
 	// would be cancelled by triggerRestart's root-ctx cancel.
-	claimMu        sync.Mutex
-	pauseClaims    bool                 // when true, the batch poller skips claiming
-	claimsInFlight int                  // pollers that have decided to claim but haven't yet handed the task off to handleTask
-	maintenance    maintenanceAdmission // guarded by claimMu; independent of the transient update barrier
+	claimMu              sync.Mutex
+	pauseClaims          bool                 // when true, the batch poller skips claiming
+	claimsInFlight       int                  // pollers that have decided to claim but haven't yet handed the task off to handleTask
+	maintenance          maintenanceAdmission // guarded by claimMu; independent of the transient update barrier
+	maintenanceControlMu sync.Mutex
+	maintenanceReceipts  *maintenanceReceipts
+	lastMaintenancePoll  time.Time
 
 	activeEnvRootsMu   sync.Mutex
 	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
@@ -4525,6 +4528,7 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
+	go d.pollMaintenance(ctx, runtimeID)
 	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,

@@ -1,178 +1,177 @@
 # Durable local daemon admission
 
-`server/internal/daemon/maintenance_admission.go` extends the existing daemon
-`claimMu` admission boundary with local host/profile-bound holder/generation
-state. It is source infrastructure, **not a complete maintenance/drain API or
-deployment permission**. No CLI/HTTP control surface is exposed in this increment;
-only daemon-internal transition methods and isolated tests use it.
+`server/internal/daemon/maintenance_admission.go` extends the existing `claimMu`
+boundary with durable host/profile-bound holder/generation state. Backend-mediated
+owner control is implemented in `server/internal/daemoncontrol` and
+`runtime maintenance`. This is source infrastructure, **not a complete drain
+capability or deployment permission**. The local daemon listener has no new
+maintenance mutation endpoint.
 
 ## Implemented boundary
 
-Daemon startup loads the profile-local state before starting the health service,
-registration, claim poller or task dispatch. Missing state for a never-maintained
-profile retains the existing open behavior. Bad/mismatched/incomplete state
-returns a startup error, never a successful empty-state fallback.
+Startup loads admission and command receipts before health serving, registration
+or polling. A never-maintained profile retains existing open-startup behavior.
+Bad, mismatched or incomplete persisted state fails startup, not an empty-state
+fallback. The exclusive profile process lock is the single-writer assumption.
 
-`acquireMaintenance` holds `claimMu` while checking the expected generation and
-persisting acquisition. It blocks new local batch-claim intents on the same
-mutex as the HTTP/WS claim poller. It does not wait for idle or cancel anything:
-claims already in flight finish normal handoff, incrementing `activeTasks`
-before `exitClaim`. Existing preparation, provider execution and local-directory
-resource-wait tasks continue under their original contexts.
+Acquisition holds `claimMu` through generation validation and persistence. The
+same mutex rejects new HTTP/WS batch-claim intents while held. Already-issued
+claims finish their normal handoff, incrementing active ownership before leaving
+the inflight count. Active runs, preparation and resource-wait transitions continue;
+the gate does not cancel, reassign or delete queued/active work.
 
-Transient auto-update/self-reload/runtime-refresh barriers and server-requested
-updates reject acquisition while durable maintenance is held. Their
-`releaseClaimBarrier` clears only their own transient `pauseClaims` flag, never
-maintenance ownership. Conversely, maintenance acquisition refuses an existing
-update/barrier rather than claiming another writer's ownership.
+Transient update/reload/refresh barriers and server-requested updates cannot
+clear durable maintenance. Acquisition refuses an existing transient barrier or
+update. Local status reports inflight claims, active tasks, running providers and
+resource-wait separately. Local quiescence requires blocked, healthy admission
+and every count zero. **Complete drain is always false.**
 
-The internal observation reports inflight claims, `activeTasks`, live provider
-count and resource-wait count separately. Resource wait remains part of active
-ownership, including its transition into provider execution. `LocalQuiescent`
-requires held admission, a healthy persistence state and every count zero;
-**`CompleteDrain` is always false**. These observations are not the worker
-maintenance-evidence schema, external authorization or a fenced lease.
+## Approved owner authority
 
-## Ownership and recovery
+The owner approved these source-implementation choices:
 
-Each successful acquire/recover advances the durable generation by exactly one.
-Acquisition is compare-and-set against the last generation, including across
-release/restart. Holders are bounded nonempty strings. Expiry must be future-dated
-and at most 24 hours from the caller's clock; it is ownership metadata, **not
-an automatic admission reopening timer**.
+1. Backend-authenticated human-only requests with exact runtime/daemon-owner
+   equality. Workspace admin status alone grants no maintenance authority.
+2. Daemon-wide scope, including every runtime/workspace registration. Every owner
+   must resolve to the requesting human, with membership in every affected
+   workspace. Mixed, missing or excessive registration sets are refused.
+3. Backend-dependent acquisition, recovery and release. Backend loss never clears
+   an already-held local gate; there is no offline/local authentication bypass.
 
-An expired holder cannot release. Explicit recovery installs a new holder and
-generation while keeping admission closed. Before expiry, takeover requires
-restart/reload observation rather than a live unexpired-holder overwrite. After
-restart, the old holder cannot directly release: it must explicitly recover into
-a new generation first. Wrong holders/generations, even when an old process
-retains its credentials or reads a newer state, cannot release another holder.
-This is an internal concurrency contract; authenticated control authorization
-and a real external monotonic fencing service are still absent.
+These are approved choices, not outstanding decisions. This does not approve
+deployment, live maintenance, restarts or interruption. After-sign-in behavior,
+parked capacity work and production-disabled worker transactions are unchanged.
 
-## Owner control transport decision (not implemented)
+Loopback origin, local health, task tokens, OS identity alone, or the CLI's
+environment/workdir guard do not authenticate an owner. The control does not
+reuse the owner-or-admin runtime-update permission or send saved owner credentials
+to a local listener. It is distinct from the existing database-maintenance API.
 
-The existing local daemon listener does **not** authenticate an owner principal:
+## Authenticated delivery and results
 
-| Existing surface | Actual boundary | Why it cannot authorize maintenance |
-| --- | --- | --- |
-| `internal/daemon/health.go`: `serveHealth`, `shutdownHandler` | Loopback HTTP; health/status and shutdown do not establish a calling owner identity. | Loopback origin, PID, host/profile fields and a matching health response are not authentication. Do not copy this mutation pattern. |
-| `health.go`: `activeRepoCheckoutTask` | Bearer mapped to an active managed task. | This deliberately authenticates the identities maintenance must reject, not a human operator. |
-| `cmd/multica/cmd_agent.go`: `requireHumanLocalCommand` | CLI environment/workdir task-context guard. | A caller can bypass the CLI and send HTTP directly; the guard is not server-side authentication. |
-| `internal/middleware/auth.go`: `Auth`, `internal/handler/actor_guards.go`: `RequireHumanActor` | Backend-validated user identity and machine-credential exclusion. | These are supported backend boundaries, but are not mounted in the local daemon and supply no existing authenticated owner-to-local-daemon maintenance transport. |
-| `internal/handler/runtime_update.go`: `InitiateUpdate`, `runtime.go`: `canEditRuntime` | Backend update command for a runtime owner **or workspace admin**. | Reusing update permission would silently grant a non-owner admin host/profile-wide maintenance authority; runtime/workspace scope is not automatically local profile scope. |
+Human routes are `POST /api/runtimes/{runtimeId}/maintenance` and
+`GET /api/runtimes/{runtimeId}/maintenance/{requestId}` under backend `Auth`,
+`RequireHumanActor` and a handler backstop. Managed-task/cloud credentials are
+refused, including tasks acting for the correct owner. The CLI's task guard runs
+before configuration access, but is not the server authentication boundary.
 
-The backend's human-only guard must follow real `Auth`; trusting incoming
-`X-User-ID`/`X-Actor-Source` headers in a local handler is not equivalent.
-Likewise, task-token prefixes or absent task environment variables cannot prove
-an owner's identity. Do not forward a saved owner API token to an unverified
-local listener, mint a shared file secret, or expose a placeholder maintenance
-endpoint to fill this gap.
+The typed command has explicit UUID, operation, daemon ID, actual OS host,
+profile, holder, expected generation, UTC issue time and holder expiry. All keys
+are required, including empty strings/zero generation and zero timestamps where
+inapplicable. Unknown, duplicate,
+wrong-case, null, missing, oversized and trailing JSON are refused. Delivery
+expires two minutes after issue time. Backend operations/client requests have
+ten-second budgets and 16-KiB message limits. Clients do not follow redirects or
+automatically retry commands.
 
-**Decision required before wiring status/acquire/recover/release:** choose the
-authority and transport for the receiving daemon, not just the CLI syntax.
+Shared Redis stores one active command per daemon and retains request/results
+for 24 hours. Missing/failing Redis returns 503; there is no production
+process-local fallback. Identical IDs/payloads return the existing request;
+changed payloads conflict. Atomic delivery is **at most once**: a lost claim
+response is not redelivered and becomes `indeterminate` after the deadline.
+Redis persistence, availability and ACL qualification remain deployment
+prerequisites, not guarantees established by the isolated source tests.
 
-1. **Recommended: backend-mediated owner commands.** Reuse backend `Auth` and
-   `RequireHumanActor`, with exact runtime-owner equality (not the existing
-   owner-or-admin update permission), an explicit binding covering the entire
-   daemon/profile, and typed delivery/results over an authenticated daemon
-   channel. Approve the daemon-wide/multi-workspace ownership rule and behavior
-   when the backend is unavailable during recovery. Command IDs, replay/dedup,
-   target daemon/host/profile and holder/generation must survive ambiguous
-   delivery; an existing version-update request is not that protocol.
-2. **Alternative: a separately approved local owner control channel.** Specify
-   Windows named-pipe ACL/peer authentication and owner SID/profile binding,
-   client/server identity verification and credential lifetime. Decide whether
-   managed tasks running under the same Windows SID are explicitly in the
-   trusted OS boundary or require a separately isolated broker/credential.
-   Same-SID ACL access alone does not distinguish owner terminal from an agent
-   child. No such peer-authenticated transport is implemented in this checkout.
+The daemon polls after authenticated heartbeats, at most once per 15 seconds per
+process. Claim/result routes use `DaemonAuth`: a daemon token must match the
+exact daemon/workspace, or the supported human PAT/JWT fallback must equal the
+owner of every registration. Task/cloud identities cannot claim commands.
+Ownership and a deterministic registration-set digest are rechecked at delivery
+and result acceptance. The inventory query admits at most 512 registrations;
+513 or more is a refusal, never a silently truncated authorization set.
+These are authorization snapshots, not atomic fencing of future registrations.
 
-These are design choices, not implemented alternatives or a request to broaden
-live access controls. Do not choose or deploy one by inference. Until approved,
-there is no `daemon maintenance` CLI command or local maintenance HTTP route;
-internal transition methods remain unexposed. This blocker is independent of
-the first-fence-write durability decision below.
+The daemon independently matches its configured ID and loaded actual host/profile,
+not the configurable display name. Results bind the entire command, owner, scope,
+observation time and sanitized counts/persistence/recovery flags. Mismatched
+results/acknowledgments are refused. No credential, raw persistence error,
+command line or filesystem path is returned. A completed result is historical;
+submit a new `status` command for a fresh observation.
 
-After that decision, verification must exercise the actual CLI-to-authorized
-receiver, not a mock that assumes `isOwner: true`: reject missing/invalid,
-managed-task and wrong-owner credentials before reading counts or state;
-validate host/profile, operation-specific holder/generation and strict bounded
-JSON; return sanitized counts and persistence/recovery reason codes without
-raw errors/paths/tokens; reject stale recovery/release and persistence faults;
-preserve `completeDrain: false`. Include transport replay/target checks and
-unauthenticated direct-call fixtures. No live acquisition is needed for those
-tests.
+## Durable replay and ambiguous outcomes
 
-## Persistence and failure ordering
+Before execution, the daemon exclusively creates/syncs an immutable
+`maintenance-commands/<uuid>.intent` in its profile. A separate bound `.result`
+is created/synced after the local transition. Identical completed replay returns
+the saved result without execution, including after restart. Changed payloads
+conflict. An intent without a result is never automatically executed again.
 
-The daemon's existing exclusive **profile process lock** is the only allowed
-writer owner. External processes must not edit/append this store or pretend that
-its files are an enforced host maintenance interface.
+On startup, an unresolved mutation intent at the current/newer generation closes
+admission and requires explicit recovery, including when release committed but
+its result did not. A successful newer recovery generation supersedes that old
+uncertainty; replay of the old ID still cannot execute again. Failed receipt
+storage latches the running process closed. Torn, inaccessible, orphaned or
+binding-mismatched receipts fail startup. The 1,024-command receipt limit requires
+reviewed offline archival on exhaustion, never automatic deletion/reset.
 
-`maintenance-admission.jsonl` is a bounded 1-MiB append-only transition journal.
-Records bind schema version, actual OS host name, profile, holder, generation,
-held/open state and expiry. Full records and transitions are validated on load;
-duplicate, unknown, null, missing or wrong-case JSON keys, skipped generations
-and wrong host/profile fail closed. Exhaustion requires reviewed offline archival,
-not automatic truncation or generation reset.
+After ambiguous transport failure, read the original request ID. Do not generate
+a replacement acquisition/release as an automatic retry. An indeterminate result
+requires a new authorized status observation and, where needed, explicit
+generation recovery. No daemon resumes undelivered commands or authenticates
+offline from receipts.
 
-Ordering under `claimMu`:
+## Holder, recovery and persistence ordering
 
-1. Latch in-memory admission closed.
-2. Create/sync a separate `.held` fence before appending/syncing the held record.
-   Only then acknowledge acquisition.
-3. For release, append/sync the open record first, remove the fence second, and
-   only then reopen in-memory admission. Release retains the last generation.
+Every successful acquire/recover advances the durable generation by one.
+Holder strings are bounded/nonempty and expiry is future-dated, at most 24 hours
+from issue time. Expiry is ownership metadata, **never a reopening timer**.
+Wrong holder/generation, expired or reloaded holders cannot release.
+Explicit recovery installs a new holder/generation without reopening admission.
+Before expiry it requires restart/reload observation, not live-holder overwrite.
+Persistence faults require healthy reload before recovery; corruption requires
+reviewed repair rather than blind retry.
 
-Every persistence failure returns an error and latches the current process
-closed. Ambiguous journal-write acknowledgements, torn records and failed fence
-removal do not reopen after reload: the held record or surviving fence keeps the
-state closed, or startup returns an error. A surviving fence with an otherwise
-released valid history needs explicit generation recovery. A fence with a
-missing/corrupt journal requires reviewed offline repair; the code does not
-invent a prior generation or silently truncate a torn tail.
+`maintenance-admission.jsonl` is a bounded 1-MiB append-only journal. Records bind
+version, actual host, profile, holder, generation, held/open state and expiry.
+Load rejects duplicate, unknown, null, missing/wrong-case keys, skipped
+generations and wrong binding. Exhaustion requires offline archival.
 
-**First-write limit:** if storage refuses the fence itself before any durable
-intent can be written, no durable acquisition is acknowledged. The current
-process remains faulted/closed, but a later process cannot reconstruct an event
-that storage never recorded. Guaranteeing closed-on-restart even for that case
-requires a separately durable external authority or an explicitly approved
-closed-by-default startup policy. Neither is claimed here. Do not treat a failed
-acquire as a maintenance grant or restart to bypass its reported fault.
+Under `claimMu`, acquisition latches closed, creates/syncs a `.held` fence, then
+appends/syncs the held record before acknowledgment. Release appends/syncs the
+open record, removes the fence, then clears in-memory admission. Generation is
+retained. Every persistence failure reports failure and latches closed.
+Surviving fence plus valid released history requires recovery; fence with
+missing/corrupt journal fails startup. No torn tail is silently truncated.
 
-File syncs and boundary fault injection qualify **process-crash/reload logic**,
-not machine power-loss/storage-controller durability. Directory metadata flush,
-filesystem qualification, protected provenance/ACLs, noncooperating/privileged
-writers and path-replacement attacks remain production prerequisites. Symlink
-paths are refused, but these files are not an authenticated lease.
+**First-write limit remains an unresolved decision:** if storage refuses every
+initial durable intent, including command receipt and admission fence, no durable
+acquisition is acknowledged. This process remains faulted/closed, but a replacement
+cannot reconstruct an event never recorded. A separately durable authority or
+explicitly approved closed-by-default startup policy is still required for that
+case. Neither is silently adopted. Do not restart to bypass a reported fault.
 
-## Paths still outside the complete drain boundary
+Syncs/fault injection qualify process-crash/reload logic, not power-loss/storage
+controller behavior. Directory metadata flush, filesystem qualification, protected
+ACL/provenance, malicious same-account/privileged writers and path replacement
+remain production prerequisites. Symlink refusal is not an authenticated lease.
 
-| Path | Current status |
+## Paths outside complete drain
+
+| Path | Boundary |
 | --- | --- |
-| Batch claims over HTTP or negotiated WS RPC | Same `tryEnterClaim` mutex rejects new intents while held. Already-issued requests may finish and are counted. |
-| Server queue/dispatch/reservation/retry transitions | Server remains independent; it may queue/dispatch work while this daemon is held. Nothing is cancelled, reassigned or deleted to manufacture a drain. Server-side enforcement/accounting is not implemented here. |
-| Already-owned tasks, preparation and resource wait | Continue; maintenance does not retroactively stop their provider launches or external effects. Counts must reach zero before local quiescence. |
-| Supervisor/Task Scheduler/process starts, respawn and other profiles | Not fenced by this local journal. A restarted daemon reloads held admission but still performs ordinary startup/registration; orphan descendants need independent qualification. |
-| External installer, binary replacement and rollback writers | Not authorized or fenced by the in-process barrier. Worker transactions remain Production-disabled. |
-| Health/forwarding/provider/WebSocket qualification and canary | Separate observations/approvals; neither a held journal nor zero local counts proves them. |
-| Maintenance CLI/API/auth, renewals and protected operator recovery | Not exposed. Control must validate authority and host/profile/generation through the single daemon owner before production integration. |
+| HTTP/WS batch claims | New intents rejected; already-issued requests finish and are counted. |
+| Backend queue/dispatch/reservation/retry | Not fenced. Queued work is preserved; no cancellation/reassignment manufactures drain. |
+| Already-owned tasks and resource wait | Continue into provider execution; all ownership counts must reach zero. |
+| Supervisor, scheduler, respawn, other profiles | Not fenced. Restart reloads held admission but ordinary registration still runs; orphan lineage needs qualification. |
+| Installer, replacement and rollback writers | Not authorized/fenced. Production worker transactions remain disabled. |
+| Health, forwarding, WebSocket/provider, canary | Separate evidence/approvals. Local counts cannot prove them. |
+| Maintenance control | Exact-owner local admission/recovery implemented; no complete-drain lease, renewal or protected external executor. |
 
-PILOT-15 capacity work must not substitute capacity settings for these remaining
-gates. Host shutdown/restart, external deployment and sign-in recovery still need
-the approved executor/window and existing live-host permissions.
+PILOT-15 remains parked. Deployment channel, per-host authentication, approved
+external executor/window and live interruption/sign-in qualification are separate
+owner decisions. GitHub PR-link repair remains a platform dependency.
 
-## Isolated checks
+## Isolated verification
 
 ```powershell
 Set-Location .\server
-go test ./internal/daemon -run 'TestMaintenanceAdmission|TestTryEnterClaim|TestTrySetClaimBarrier|TestHandleUpdate|TestTryAutoUpdate|TestTrySelfReload' -count=1 -timeout 120s
+go test ./pkg/protocol ./internal/daemoncontrol ./internal/daemon ./internal/cli ./cmd/multica -run 'TestMaintenance|TestRuntimeMaintenance|TestTryEnterClaim|TestTrySetClaimBarrier|TestHandleUpdate|TestTryAutoUpdate|TestTrySelfReload' -count=1 -timeout 120s
 ```
 
-Tests cover acquisition-versus-claim races, inflight handoff/resource-wait counts,
-expiry/recovery/stale release, crash/reload, before/after persistence faults,
-fence-only crashes, malformed/binding-mismatched journals, and the actual batch
-poller against an isolated HTTP fixture. Held polling makes no server request;
-after explicit release, the same poller resumes its claim path. No live queue,
-profile, provider executable, daemon or host service is used.
+Set `REDIS_MAINTENANCE_TEST_URL` to an isolated Redis fixture for real atomic
+delivery/result and concurrent replay checks. Tests use unique daemon/request
+keys and never flush a database; only those Redis tests skip without the variable.
+Other fixtures exercise real authentication middleware, CLI/handler wiring,
+strict input/results, crash/reload, persistence failures, queue preservation,
+acquire-versus-claim races and stale recovery/release. No live profile, queue,
+provider executable, maintenance operation or host service is used.

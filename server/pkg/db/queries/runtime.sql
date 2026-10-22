@@ -1,3 +1,12 @@
+-- name: ListDaemonMaintenanceRegistrations :many
+-- Deliberately daemon-wide: narrowing by caller/workspace would hide mixed
+-- ownership in another registration and authorize a machine-wide operation.
+SELECT id, workspace_id, owner_id, daemon_id
+FROM agent_runtime
+WHERE daemon_id = $1
+ORDER BY workspace_id, id
+LIMIT 513;
+
 -- name: ListAgentRuntimes :many
 SELECT * FROM agent_runtime
 WHERE workspace_id = $1

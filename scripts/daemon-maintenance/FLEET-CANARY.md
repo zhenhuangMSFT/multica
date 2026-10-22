@@ -107,9 +107,10 @@ The daemon's existing `claimMu`/`pauseClaims`/`claimsInFlight` barrier now inclu
 [durable local admission ownership](DAEMON-ADMISSION.md): host/profile-bound
 holder/generation transitions, explicit crash/expiry recovery and fail-closed
 local claim rejection. Clearing an auto-update barrier cannot release a
-maintenance holder. This still has no authenticated external maintenance control
-command, server-side dispatch enforcement, supervisor respawn fencing or complete
-drain grant. Its documented first-write/storage limits remain explicit.
+maintenance holder. Backend-authenticated exact-owner `runtime maintenance`
+commands now control this local gate, with durable replay receipts and bound
+results. Server-side dispatch, supervisor respawn, external writers and complete
+drain remain unfenced. The first-write/storage limits remain explicit.
 
 1. Host/profile-authorized maintenance acquisition returns an exclusive lease
    identity/generation and gates all claim paths before acknowledging acquisition.

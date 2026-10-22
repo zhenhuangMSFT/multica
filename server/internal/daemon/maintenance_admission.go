@@ -55,9 +55,12 @@ func (d *Daemon) loadMaintenanceAdmission() error {
 	if err != nil {
 		return err
 	}
-	return d.initializeMaintenance(&maintenanceFileStore{
+	if err := d.initializeMaintenance(&maintenanceFileStore{
 		path: filepath.Join(dir, "maintenance-admission.jsonl"), host: host, profile: d.cfg.Profile,
-	})
+	}); err != nil {
+		return err
+	}
+	return d.loadMaintenanceReceipts(filepath.Join(dir, "maintenance-commands"))
 }
 
 func (d *Daemon) initializeMaintenance(store maintenancePersistence) error {
@@ -75,7 +78,6 @@ func (d *Daemon) initializeMaintenance(store maintenancePersistence) error {
 
 // acquireMaintenance pauses only local batch claims. Claims already in flight
 // finish their normal handoff and active/resource-wait tasks are not cancelled.
-// These methods intentionally have no CLI/HTTP control surface in this increment.
 func (d *Daemon) acquireMaintenance(holder string, expected uint64, expires, now time.Time) (maintenanceRecord, error) {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
@@ -158,6 +160,7 @@ type maintenanceObservation struct {
 	ResourceWait     int64
 	LocalQuiescent   bool
 	CompleteDrain    bool
+	RecoveryRequired bool
 	PersistenceFault error
 }
 
@@ -171,6 +174,7 @@ func (d *Daemon) observeMaintenance() maintenanceObservation {
 		ActiveTasks: active, RunningTasks: running, ResourceWait: waiting,
 		LocalQuiescent: m.blocked() && m.fault == nil && d.claimsInFlight == 0 && active == 0 && running == 0 && waiting == 0,
 		CompleteDrain:  false, PersistenceFault: m.fault,
+		RecoveryRequired: m.reloaded || (m.record.Held && !time.Now().Before(m.record.ExpiresAt)),
 	}
 }
 

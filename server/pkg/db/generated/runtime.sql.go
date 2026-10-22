@@ -885,6 +885,48 @@ func (q *Queries) ListDaemonCustomNames(ctx context.Context, arg ListDaemonCusto
 	return items, nil
 }
 
+const listDaemonMaintenanceRegistrations = `-- name: ListDaemonMaintenanceRegistrations :many
+SELECT id, workspace_id, owner_id, daemon_id
+FROM agent_runtime
+WHERE daemon_id = $1
+ORDER BY workspace_id, id
+LIMIT 513
+`
+
+type ListDaemonMaintenanceRegistrationsRow struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+	DaemonID    pgtype.Text `json:"daemon_id"`
+}
+
+// Deliberately daemon-wide: narrowing by caller/workspace would hide mixed
+// ownership in another registration and authorize a machine-wide operation.
+func (q *Queries) ListDaemonMaintenanceRegistrations(ctx context.Context, daemonID pgtype.Text) ([]ListDaemonMaintenanceRegistrationsRow, error) {
+	rows, err := q.db.Query(ctx, listDaemonMaintenanceRegistrations, daemonID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDaemonMaintenanceRegistrationsRow{}
+	for rows.Next() {
+		var i ListDaemonMaintenanceRegistrationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.OwnerID,
+			&i.DaemonID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNonOwnerActiveTasksByRuntime = `-- name: ListNonOwnerActiveTasksByRuntime :many
 SELECT task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot, task.workflow_step
 FROM agent_task_queue AS task

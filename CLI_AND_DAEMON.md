@@ -59,6 +59,34 @@ The metadata mirror must serve `/repos/multica-ai/multica/releases/latest` and
 `/<tag>/<asset-name>` and preserve the published `checksums.txt` contents.
 When these variables are unset, the GitHub defaults remain unchanged.
 
+### Owner maintenance control (source capability)
+
+`runtime maintenance` controls daemon-wide **local claim admission**, not host
+deployment or complete draining. It requires backend-authenticated human ownership
+of every affected runtime/workspace registration; admin status alone is insufficient.
+It is unavailable inside managed tasks and has no local authentication bypass.
+See [daemon admission and recovery](scripts/daemon-maintenance/DAEMON-ADMISSION.md)
+for approved authority, durable replay and remaining production gates.
+
+From an authorized owner terminal, after separate live-maintenance approval:
+
+```powershell
+$id = [guid]::NewGuid().ToString()
+$issued = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+multica --profile <owner-profile> runtime maintenance status <runtime-uuid> --command-id $id --issued-at $issued --expect-daemon <daemon-id> --expect-host <os-hostname> --target-profile <daemon-profile>
+multica --profile <owner-profile> runtime maintenance get <runtime-uuid> $id
+```
+
+`acquire` and `recover` additionally require `--holder`, explicit `--generation`
+and future UTC `--expires-at` (at most 24 hours). `release` requires the same
+holder and current generation, without expiry. An empty target profile means the
+default daemon profile, not the owner CLI's selected profile. Submission is
+pending, not proof of execution; read its request for the bound result.
+Delivery expires after two minutes. Ambiguous delivery is not automatically
+retried: retain the original ID/time and inspect it before further action.
+Expiry, backend loss and restart never authorize automatic release.
+`complete_drain` is always false.
+
 ## Quick Start
 
 For controlled provisioning of additional Windows execution hosts (without another
