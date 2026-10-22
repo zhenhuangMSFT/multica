@@ -61,7 +61,7 @@ When these variables are unset, the GitHub defaults remain unchanged.
 
 ### Owner maintenance control (source capability)
 
-`runtime maintenance` controls daemon-wide **local claim admission**, not host
+`runtime maintenance` controls daemon-wide **local and upgraded-server claim admission**, not host
 deployment or complete draining. It requires backend-authenticated human ownership
 of every affected runtime/workspace registration; admin status alone is insufficient.
 It is unavailable inside managed tasks and has no local authentication bypass.

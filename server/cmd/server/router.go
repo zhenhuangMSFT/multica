@@ -510,7 +510,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 	var maintenanceStore daemoncontrol.Store
 	if rdb != nil {
-		maintenanceStore = daemoncontrol.NewRedisStore(rdb)
+		maintenanceStore = daemoncontrol.NewFencedStore(daemoncontrol.NewRedisStore(rdb), daemoncontrol.NewPostgresAdmission(pool))
 		h.UpdateStore = handler.NewRedisUpdateStore(rdb)
 		h.ModelListStore = handler.NewRedisModelListStore(rdb)
 		h.ModelCatalogCache = handler.NewRedisModelCatalogCache(rdb)

@@ -1,4 +1,4 @@
-# Durable local daemon admission
+# Durable daemon and server admission
 
 `server/internal/daemon/maintenance_admission.go` extends the existing `claimMu`
 boundary with durable host/profile-bound holder/generation state. Backend-mediated
@@ -16,8 +16,8 @@ fallback. The exclusive profile process lock is the single-writer assumption.
 
 Acquisition holds `claimMu` through generation validation and persistence. The
 same mutex rejects new HTTP/WS batch-claim intents while held. Already-issued
-claims finish their normal handoff, incrementing active ownership before leaving
-the inflight count. Active runs, preparation and resource-wait transitions continue;
+claims either finish a previously admitted handoff or have their exact unstarted
+reservation requeued by the backend delivery gate. Active runs, preparation and resource-wait transitions continue;
 the gate does not cancel, reassign or delete queued/active work.
 
 Transient update/reload/refresh barriers and server-requested updates cannot
@@ -25,6 +25,80 @@ clear durable maintenance. Acquisition refuses an existing transient barrier or
 update. Local status reports inflight claims, active tasks, running providers and
 resource-wait separately. Local quiescence requires blocked, healthy admission
 and every count zero. **Complete drain is always false.**
+
+## Server reservations, delivery and retries
+
+The authenticated control store now persists a complementary PostgreSQL
+`daemon_maintenance_admission` fence **before** publishing acquire/recover to
+Redis. It binds the daemon, actual host/profile, exact human owner, registration
+digest, holder and expected/confirmed generation. The fence has no TTL. Redis
+deduplication is still transport state, not durable maintenance authority.
+
+`daemon_runtime_admission_open` holds a shared transaction advisory lock for the
+daemon through reservation commit. Fence writers use the matching exclusive
+lock and recheck daemon-wide ownership/membership inside the transaction.
+Its volatile post-lock state read observes a concurrent acquisition even if the
+dispatch statement started with an older MVCC snapshot. A runtime row share lock
+prevents a concurrent daemon rebind across reservation commit; lock contention
+fails the transaction rather than bypassing admission. Runtime locks are NOWAIT
+to avoid reversing the existing agent/runtime delivery lock order.
+
+Fresh queued-to-dispatched claims, both stale-reservation reclaim variants and
+both deferred-retry promotion variants use this predicate. HTTP and WebSocket
+handlers share those service/query paths. Final payload/token/receipt admission
+rechecks it inside `FinalizeTaskClaim`, after the existing owner authorization
+and before any credentials are persisted. A reservation that loses this race is
+requeued by the existing runtime/dispatch-timestamp CAS; requeue failure is
+reported and the row remains recoverable, never deleted or duplicated.
+Already-admitted delivery, active tasks and owned resource waiters can finish;
+this is not cancellation or complete draining. Queued/deferred work and new
+enqueue/retry plans are retained without being admitted to execution. Unrelated
+daemons remain available, and newly added registrations of a held daemon see
+the same fence.
+
+Queued/reconnect-retry expiry, dispatched/running timeout and offline-runtime
+failure sweeps also honor the server fence: extended maintenance/backend loss
+must not age retained work into terminal failure. Their normal policies resume
+after an acknowledged release. Explicit cancellation/revocation and actual
+daemon-restart orphan reconciliation retain their existing semantics.
+
+Only a matching, positive, healthy release result with the current holder and
+generation reopens server admission. Recovery keeps it closed and advances the
+confirmed generation only after the bound local acknowledgment. Late results
+cannot overwrite newer commands. A changed registration digest requires fresh
+exact-owner authorization and explicit recovery while held, not a stale release.
+Mixed/unresolved owners are still rejected.
+
+Failed/ambiguous Redis publication never rolls back committed server closure.
+An unresolved command cannot be superseded during its five-minute result window.
+After that window, fresh local status plus an explicit recovery can reconcile
+either the pending expected generation or its one-step local successor; no
+other jump or uncertain release is allowed. If an acquire never reached the
+daemon and its local gate is still open, an explicitly chosen new acquire at the
+same expected generation can reconcile it after that window. This is not an
+automatic retry. A profile first enrolled with already-held local state requires
+recovery; an unrecorded server release is refused.
+
+A mistargeted uncertain intent can be corrected by a fresh exact-owner
+acquire/recover only after that result window, keeping server admission closed.
+The daemon still independently validates actual host/profile and generation;
+target correction never authorizes a release or changes owner/daemon identity.
+
+The repository persists a bound result before completing the Redis result.
+If that final Redis write/ack fails after a valid release commit, server
+admission may already be open: the explicit release was persisted, but delivery
+status may remain indeterminate. An identical result can be reported again;
+an old result cannot reopen a newer fence. No distributed atomicity between
+PostgreSQL, Redis and local files is claimed. CLI status counts still describe
+the daemon's local observation, not a fresh server reservation census.
+
+Migration sources 585/586 add the fence and a separately built concurrent unique
+index; they have only been exercised on an isolated test database. Production
+application/rollback needs separate approval and a quiescent deployment plan.
+All server replicas must run the fenced queries before relying on this boundary;
+older binaries and external/direct database writers do not honor it. Missing
+schema/database failures propagate rather than falling back to unfenced claims.
+Never delete fence rows or roll back the gate while maintenance is held.
 
 ## Approved owner authority
 
@@ -79,7 +153,9 @@ owner of every registration. Task/cloud identities cannot claim commands.
 Ownership and a deterministic registration-set digest are rechecked at delivery
 and result acceptance. The inventory query admits at most 512 registrations;
 513 or more is a refusal, never a silently truncated authorization set.
-These are authorization snapshots, not atomic fencing of future registrations.
+These are authorization snapshots, not atomic fencing of future ownership,
+membership or registration writers. Reservation admission additionally binds
+its runtime row and the daemon gate through commit.
 
 The daemon independently matches its configured ID and loaded actual host/profile,
 not the configurable display name. Results bind the entire command, owner, scope,
@@ -150,7 +226,7 @@ remain production prerequisites. Symlink refusal is not an authenticated lease.
 | Path | Boundary |
 | --- | --- |
 | HTTP/WS batch claims | New intents rejected; already-issued requests finish and are counted. |
-| Backend queue/dispatch/reservation/retry | Not fenced. Queued work is preserved; no cancellation/reassignment manufactures drain. |
+| Backend queue/dispatch/reservation/retry | Fenced on upgraded replicas: fresh claims, stale reclaim, retry promotion and final token/payload admission. New plans stay queued; admitted work may finish. Older replicas/direct writers remain outside the boundary. |
 | Already-owned tasks and resource wait | Continue into provider execution; all ownership counts must reach zero. |
 | Supervisor, scheduler, respawn, other profiles | Not fenced. Restart reloads held admission but ordinary registration still runs; orphan lineage needs qualification. |
 | Installer, replacement and rollback writers | Not authorized/fenced. Production worker transactions remain disabled. |
@@ -165,13 +241,16 @@ owner decisions. GitHub PR-link repair remains a platform dependency.
 
 ```powershell
 Set-Location .\server
-go test ./pkg/protocol ./internal/daemoncontrol ./internal/daemon ./internal/cli ./cmd/multica -run 'TestMaintenance|TestRuntimeMaintenance|TestTryEnterClaim|TestTrySetClaimBarrier|TestHandleUpdate|TestTryAutoUpdate|TestTrySelfReload' -count=1 -timeout 120s
+go test ./pkg/protocol ./internal/daemoncontrol ./internal/service ./internal/handler ./internal/daemon ./internal/cli ./cmd/multica -run 'TestMaintenance|TestRuntimeMaintenance|TestTryEnterClaim|TestTrySetClaimBarrier|TestHandleUpdate|TestTryAutoUpdate|TestTrySelfReload' -count=1 -timeout 180s
 ```
 
 Set `REDIS_MAINTENANCE_TEST_URL` to an isolated Redis fixture for real atomic
 delivery/result and concurrent replay checks. Tests use unique daemon/request
 keys and never flush a database; only those Redis tests skip without the variable.
-Other fixtures exercise real authentication middleware, CLI/handler wiring,
+Server admission tests also need `DATABASE_URL` pointing to the checkout's
+migrated isolated test database; without it reachable, the repository's normal
+DB-fixture skip applies. Combined store tests require both services. No live
+database or owner profile should be used. Other fixtures exercise real authentication middleware, CLI/handler wiring,
 strict input/results, crash/reload, persistence failures, queue preservation,
 acquire-versus-claim races and stale recovery/release. No live profile, queue,
 provider executable, maintenance operation or host service is used.

@@ -109,8 +109,11 @@ holder/generation transitions, explicit crash/expiry recovery and fail-closed
 local claim rejection. Clearing an auto-update barrier cannot release a
 maintenance holder. Backend-authenticated exact-owner `runtime maintenance`
 commands now control this local gate, with durable replay receipts and bound
-results. Server-side dispatch, supervisor respawn, external writers and complete
-drain remain unfenced. The first-write/storage limits remain explicit.
+results. A complementary PostgreSQL fence now serializes server claim,
+stale-reservation reclaim, deferred-retry promotion and final token/payload
+admission on upgraded replicas; existing work/queues are preserved. Supervisor
+respawn, older replicas, external writers and complete drain remain unfenced.
+The first-write/storage limits remain explicit.
 
 1. Host/profile-authorized maintenance acquisition returns an exclusive lease
    identity/generation and gates all claim paths before acknowledging acquisition.

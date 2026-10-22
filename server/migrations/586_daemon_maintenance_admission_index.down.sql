@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS daemon_maintenance_admission_daemon_idx;

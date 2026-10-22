@@ -1550,6 +1550,7 @@ WHERE id = (
     WHERE atq.agent_id = $2
       AND atq.runtime_id = $3
       AND atq.status = 'queued'
+      AND daemon_runtime_admission_open(atq.runtime_id)
       AND (atq.context->>'wakeup_id' IS NULL OR EXISTS (SELECT 1 FROM issue_wakeup w WHERE w.id=(atq.context->>'wakeup_id')::uuid AND w.disabled_at IS NULL AND w.revision=(atq.context->>'wakeup_revision')::bigint))
       AND EXISTS (
           SELECT 1
@@ -3121,6 +3122,8 @@ const expireStaleQueuedTasks = `-- name: ExpireStaleQueuedTasks :many
 WITH victims AS (
     SELECT id FROM agent_task_queue
     WHERE status = 'queued' AND context->>'wakeup_id' IS NULL
+      AND (NOT EXISTS (SELECT 1 FROM agent_runtime r WHERE r.id = agent_task_queue.runtime_id)
+           OR daemon_runtime_admission_open(runtime_id))
       AND created_at < now() - make_interval(secs => $1::double precision)
       AND (
           runtime_id IS NULL
@@ -3481,6 +3484,8 @@ WITH victims AS (
     FROM agent_task_queue retry
     JOIN agent_task_queue parent ON parent.id = retry.parent_task_id
     WHERE retry.status = 'deferred'
+      AND (NOT EXISTS (SELECT 1 FROM agent_runtime r WHERE r.id = retry.runtime_id)
+           OR daemon_runtime_admission_open(retry.runtime_id))
       AND retry.fire_at < now() - make_interval(secs => $1::double precision)
       AND parent.failure_reason = 'runtime_offline'
       AND NOT EXISTS (
@@ -3619,7 +3624,9 @@ UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'task timed out',
     failure_reason = 'timeout',
     prepare_lease_expires_at = NULL
-WHERE (
+WHERE (NOT EXISTS (SELECT 1 FROM agent_runtime r WHERE r.id = agent_task_queue.runtime_id)
+       OR daemon_runtime_admission_open(runtime_id))
+AND ((
     status = 'dispatched'
     AND dispatched_at < now() - make_interval(secs => $1::double precision)
     AND (prepare_lease_expires_at IS NULL OR prepare_lease_expires_at < now())
@@ -3656,7 +3663,7 @@ WHERE (
               now() - make_interval(secs => $3::double precision)
       )
     )
-  )
+  ))
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
 `
 
@@ -7257,6 +7264,7 @@ SELECT MIN(fire_at)::timestamptz
 FROM agent_task_queue t
 WHERE t.runtime_id = ANY($1::uuid[])
   AND t.status = 'deferred'
+  AND daemon_runtime_admission_open(t.runtime_id)
   AND EXISTS (
     SELECT 1 FROM agent_runtime r
     WHERE r.id = t.runtime_id
@@ -7388,6 +7396,7 @@ WITH due AS (
     FROM agent_task_queue t
     WHERE t.runtime_id = $1
       AND t.status = 'deferred'
+      AND daemon_runtime_admission_open(t.runtime_id)
       AND t.fire_at <= now()
       AND EXISTS (
         SELECT 1 FROM agent_runtime r
@@ -7526,6 +7535,7 @@ WITH due AS (
     FROM agent_task_queue t
     WHERE t.runtime_id = ANY($1::uuid[])
       AND t.status = 'deferred'
+      AND daemon_runtime_admission_open(t.runtime_id)
       AND t.fire_at <= now()
       AND EXISTS (
         SELECT 1 FROM agent_runtime r
@@ -7724,6 +7734,7 @@ WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.runtime_id = $1
       AND atq.status = 'dispatched'
+      AND daemon_runtime_admission_open(atq.runtime_id)
       AND atq.started_at IS NULL
       AND atq.dispatched_at < now() - make_interval(secs => $3::double precision)
       AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
@@ -7850,6 +7861,7 @@ WHERE id IN (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.runtime_id = ANY($2::uuid[])
       AND atq.status = 'dispatched'
+      AND daemon_runtime_admission_open(atq.runtime_id)
       AND atq.started_at IS NULL
       AND atq.dispatched_at < now() - make_interval(secs => $3::double precision)
       AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
