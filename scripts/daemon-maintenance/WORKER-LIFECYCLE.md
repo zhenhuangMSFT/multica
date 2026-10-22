@@ -191,6 +191,11 @@ canary finalization, full readiness aggregator, atomic health publisher or share
 drain/lease implementation is claimed. These remain engineering/qualification
 dependencies, not merely owner approvals.
 
+The [daemon admission increment](DAEMON-ADMISSION.md) now durably holds local
+batch claims at the existing mutex with explicit holder/generation recovery.
+It is not the complete shared drain/respawn boundary and does not enable worker
+Production transactions or convert these supplied maintenance records into leases.
+
 The integration test consumes the actual v2 installer Plan and launch-policy
 helper, mapping two loopback configurations into this module's identity/ownership
 checks. It never registers tasks or runs providers. Fake receipt/task hashes in

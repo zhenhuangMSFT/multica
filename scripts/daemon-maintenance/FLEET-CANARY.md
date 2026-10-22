@@ -101,15 +101,15 @@ is enabled by collecting a snapshot.
 ## Shared admission/drain proposal for review
 
 This interface is NOT implemented by a capacity setting, file lock or evidence
-boolean. It requires a product design before live upgrade/retirement:
+boolean. Its complete product boundary is still required before live upgrade/retirement:
 
-The daemon already has an in-memory `claimMu`/`pauseClaims`/`claimsInFlight`
-barrier in `server/internal/daemon/daemon.go`, used by idle auto-update and
-server-triggered updates. Extend this admission boundary rather than introducing
-a parallel semaphore. It has no durable external holder/generation, protected
-maintenance control command, or supervisor respawn fencing. Its release behavior
-must remain isolated from future external maintenance ownership; clearing an
-auto-update barrier must not release a maintenance holder.
+The daemon's existing `claimMu`/`pauseClaims`/`claimsInFlight` barrier now includes
+[durable local admission ownership](DAEMON-ADMISSION.md): host/profile-bound
+holder/generation transitions, explicit crash/expiry recovery and fail-closed
+local claim rejection. Clearing an auto-update barrier cannot release a
+maintenance holder. This still has no authenticated external maintenance control
+command, server-side dispatch enforcement, supervisor respawn fencing or complete
+drain grant. Its documented first-write/storage limits remain explicit.
 
 1. Host/profile-authorized maintenance acquisition returns an exclusive lease
    identity/generation and gates all claim paths before acknowledging acquisition.

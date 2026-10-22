@@ -45,6 +45,8 @@ stopping the daemon from its own task would orphan the task and its final report
 | Close | Record timestamps, hashes, before/after identities, verification results, rollback availability and unresolved limitations. Rollout remains incomplete if any gate is unproven. |
 
 The current CLI has no qualified general-purpose drain command in this workflow.
+The [durable local daemon admission boundary](DAEMON-ADMISSION.md) is implemented
+as internal source/test infrastructure, not an external control or full drain grant.
 Do not substitute `max_concurrent_tasks`, a status snapshot, a comment saying
 "maintenance", or an assumed mutex. If no enforced admission mechanism is available,
 defer the live upgrade and implement/approve one first.
