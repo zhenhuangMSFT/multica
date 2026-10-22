@@ -1,5 +1,10 @@
 # Owned-task reconciliation and health interface proposal
 
+**Architecture placement:** the host policy, supervisor and deployment adapters
+below belong in the [optional external runtime-management extension](../daemon-maintenance/EXTERNAL-RUNTIME-MANAGEMENT.md),
+not core Multica. This is a refactor plan, not an installed service or an
+approved broker identity. Existing live after-sign-in startup is unchanged.
+
 This describes the host-adapter integration boundary, not an implemented production updater, health service or maintenance API. After-sign-in service is the accepted scope. Preserve existing upstream startup tasks. Shared executable policy and the simulation coordinator are in `../daemon-maintenance/`; see `WORKER-LIFECYCLE.md` there for implemented portions and the bounded `auth probe` API collector.
 
 ## Implemented in this revision

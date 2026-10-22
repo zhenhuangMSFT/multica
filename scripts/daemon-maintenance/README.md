@@ -1,5 +1,9 @@
 # Controlled daemon upgrades
 
+The current [external runtime-management architecture](EXTERNAL-RUNTIME-MANAGEMENT.md)
+separates optional fleet/OS policy from minimal generic core lifecycle hooks.
+The scripts here are draft extraction candidates, not an installed extension.
+
 Use this process for a source fix or packaged Multica CLI/daemon update on an
 existing worker. It does not authorize a rollout. Provider CLI upgrades, backend
 changes, database migrations, startup-identity changes and reboots are separate

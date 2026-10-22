@@ -1,5 +1,11 @@
 # Supervised launch: proposed authority and transport contract
 
+**Revised placement:** [optional external runtime management](EXTERNAL-RUNTIME-MANAGEMENT.md)
+is the current architecture recommendation. The broker, OS policy, enrollment,
+deployment and journals proposed here belong to that separately versioned
+extension, not core Multica. This document's authority/privilege choices remain
+unapproved; a plugin package does not install or host the broker.
+
 **Decision required; not implemented or enabled.** The existing maintenance
 authority covers human requests, backend reservations and local daemon claims.
 It does not authorize an external process to start children, and it cannot

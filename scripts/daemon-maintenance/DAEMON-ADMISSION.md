@@ -1,5 +1,10 @@
 # Durable daemon and server admission
 
+For the current external-service boundary, complete PR inventory and staged
+extraction plan, see [optional external runtime management](EXTERNAL-RUNTIME-MANAGEMENT.md).
+The implementation below is the existing draft prototype; this architecture
+revision has not refactored it or approved further fleet expansion in core.
+
 `server/internal/daemon/maintenance_admission.go` extends the existing `claimMu`
 boundary with durable host/profile-bound holder/generation state. Backend-mediated
 owner control is implemented in `server/internal/daemoncontrol` and
