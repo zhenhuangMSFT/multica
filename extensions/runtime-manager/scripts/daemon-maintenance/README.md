@@ -77,7 +77,8 @@ side effects; startup recovery is not exactly-once execution.
 
 ## Example: assigned MCP servers absent in Copilot
 
-The candidate change in `server/pkg/agent/copilot.go` forwards the effective
+The separate [provider correction in PR #4](https://github.com/zhenhuangMSFT/multica/pull/4)
+changes `server/pkg/agent/copilot.go` to forward the effective
 managed MCP configuration with `--additional-mcp-config @<private-temp-file>`.
 An enabled assignment alone does not test forwarding, startup or Azure access.
 

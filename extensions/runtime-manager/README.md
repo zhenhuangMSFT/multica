@@ -27,9 +27,10 @@ Generic reservation/claim fencing and authenticated owner control remain with
 Multica's backend/daemon. The public core contract is
 `server/pkg/lifecycle/v1` in the Multica source, identified as
 `multica-lifecycle/v1`. Do not copy its state machines or import core internals
-into this package. The independent Copilot correction remains the standalone
-commit `b0aa908d8` (only `server/pkg/agent/copilot.go` and its regression test);
-it is not a manager dependency and needs no extension to run.
+into this package. The independent Copilot correction is isolated in
+[PR #4](https://github.com/zhenhuangMSFT/multica/pull/4), commit `b0aa908d8`
+(only `server/pkg/agent/copilot.go` and its regression test). It is removed from
+PR #3's net diff, is not a manager dependency and needs no extension to run.
 
 The approved external-service boundary does not approve a host executor's
 identity, privilege, credential enrollment or transport. That executor remains
@@ -39,7 +40,7 @@ live startup paths are not relocated or upgraded by moving this source.
 
 ## Isolated verification
 
-With PowerShell 7, from this package directory:
+With PowerShell 7 on Windows, from this package directory:
 
 ```powershell
 .\Test-Package.ps1

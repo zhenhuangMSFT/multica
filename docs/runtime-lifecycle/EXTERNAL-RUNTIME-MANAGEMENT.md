@@ -20,8 +20,10 @@ repository destination is selected. Its own `extension.json` version and explici
 standalone fixture runner do not participate in core startup or default builds.
 The three fleet script trees and their tests have been physically extracted;
 generic admission and this boundary document live under `docs/runtime-lifecycle`.
-The independent Copilot correction remains isolated at `b0aa908d8`, a two-file
-commit with no fleet dependency. No remote repository or pipeline was created.
+The independent Copilot correction is isolated at `b0aa908d8` in
+[PR #4](https://github.com/zhenhuangMSFT/multica/pull/4), a two-file commit with no
+fleet dependency, and removed from PR #3's net diff. No remote repository or
+release pipeline was created.
 
 The target remains a separate `runtime-manager` product/repository
 with its own semantic versions, signed OS packages, release manifest, contract
