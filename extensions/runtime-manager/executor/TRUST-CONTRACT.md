@@ -72,8 +72,17 @@ Revocation denies subsequent `Verify`, including stale responses and bootstrap
 opening. It does not kill an existing child or reopen maintenance. Binding/key
 rotation needs a human-approved, generation-preserving handoff with fresh
 incarnation and reconciliation; journal deletion/reinstallation is not rotation.
-The external manager/transport are not implemented; the shipped production
-authority adapter always returns `ErrUnavailable`.
+The external manager/transport are not implemented; the default
+`UnavailableAuthority` still returns `ErrUnavailable`. The optional
+`CertificateAuthority` now implements injected certificate/message verification,
+not production credential loading, human authentication, enrollment or transport.
+Its [source verification contract](README.md#injected-authority-verification)
+specifies exact pins/URI/DNS roles, signed existing-contract digests, separate
+human approval, bounded current-source checks and historical replay semantics.
+Injected `ChannelSource` must supply actual completed, normally verified TLS 1.3
+state from the future transport, never a caller-authored peer/actor claim.
+Injected configuration/record sources must be protected and authoritative,
+including current revocation; fake fixtures are not production providers.
 
 ## Local IPC, journal and receipts
 

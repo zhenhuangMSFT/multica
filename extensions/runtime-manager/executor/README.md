@@ -3,8 +3,9 @@
 **Implemented library and isolated adapters, not an installed host service.**
 This optional source package owns launch serialization, durable attempt/replay
 state, unknown-child reconciliation and one-use replacement. No core package
-imports it. Production authentication, Windows process creation, service hosting,
-protected storage, enrollment and the external manager are unavailable.
+imports it. Injected certificate/message verification is implemented; production
+transport and trusted enrollment/decision/human-approval sources, Windows process
+creation, service hosting, protected storage and the external manager are unavailable.
 
 ## Implemented contract
 
@@ -24,7 +25,10 @@ credential reader or automatic OS discovery.
 
 `Authority.Verify` must verify an authenticated, committed external-manager
 decision; it is not implemented by checking actor metadata or the core proof
-alone. `UnavailableAuthority` and `UnavailableProcesses` return explicit errors.
+alone. The optional `CertificateAuthority` adapter verifies signed decisions and
+participant results against injected trust, channel and authoritative records;
+see [its verification contract](#injected-authority-verification).
+`UnavailableAuthority` and `UnavailableProcesses` remain the explicit defaults.
 Tests supply fake authenticated decisions and process identities, never live
 credentials or processes. There is no exported "allow all" production adapter.
 
@@ -93,6 +97,61 @@ remain unqualified. A production protected journal/locking adapter is required.
 The local executor's sealed bootstrap does not change core daemon open-startup
 policy or settle its first-fence-write decision.
 
+## Injected authority verification
+
+`CertificateAuthority` implements `Authority.Verify` without a listener, network
+client, key loader or default system roots. It needs **all** of these trusted,
+context-aware sources: approved active enrollment/revocation configuration,
+completed TLS channel state, committed manager decision and, for maintenance,
+a separate authenticated-human approval. There are no production source
+implementations. Missing/unapproved configuration is unavailable, never an
+allow-all fallback. The default adapters remain unchanged.
+
+Enrollment fixes the exact binding/incarnation, manager URI and DNS name,
+executor URI, distinct certificate SHA-256 pins and explicit root certificates.
+Verification requires TLS 1.3, completed verified handshake evidence, matching
+peer/message certificate, exact manager DNS/URI or executor URI, explicit
+server/client authentication roles, valid pinned chains and nonrevoked peer/CA
+fingerprints. No system trust, AIA/CRL/OCSP lookup, DNS lookup or network fallback
+is used. Fixtures generate only ephemeral in-memory Ed25519 keys/certificates.
+Other signature algorithms and production CNG integration are not implemented.
+
+The subordinate `runtime-manager-executor/v1/authority` message uses strict
+bounded JSON and Ed25519 over `SignedAuthority.SigningBytes()`: fixed-order
+JSON containing contract, kind, request ID/digest, outcome digest, recipient
+certificate fingerprint, issue time and expiry. Digests are SHA-256 of Go JSON
+encoding of the existing typed `Request`/`Outcome`; the full request includes
+the unchanged core proof, definition, transaction, scope and incarnation.
+Messages must expire at the request deadline, have at most one minute of
+validity and never be future-issued. Enrollment, certificates and human approval
+must cover that deadline, so a shorter credential cannot extend execution's
+existing budget. Message certificates/signatures are transport fields, not
+actor metadata or new lifecycle authority.
+
+Committed ordinary-launch policy covers `launch` and generation-zero bootstrap
+`open`; observation is participant delivery. `close`, held-generation `open` and
+`replace` additionally require an independent exact-human-owner approval bound
+to the **same request ID/digest** and expiry. A manager signature, participant
+certificate, task token, plugin callback or actor string cannot replace that
+record. Actual human authentication remains the future source's obligation;
+fixtures do not qualify a backend integration.
+
+`VerifyResult` independently checks the executor's client certificate, signed
+outcome digest and existing `Outcome.Validate` after rechecking the committed
+request authorization. The result signature is delivery provenance, **not** a
+replacement grant, complete-drain attestation or proof of an actual OS action.
+Historical flags are signed and stay historical.
+
+Every verification reads current authoritative revocation/decision records;
+there is no grant cache or in-memory nonce consumption. Exact live duplicates
+remain eligible for the executor's durable historical replay, not another
+launch. Changed bytes, revoked/expired decisions, delayed responses and old
+incarnations are refused. Sources must return owned consistent snapshots and
+honor bounded contexts; cancellation is rechecked after their return. Production
+atomic revocation/source consistency and revocation during already accepted
+local work remain unqualified. There is no claim of instantaneous revocation
+of an in-flight launch or any new process cancellation.
+
 ## Proposed production trust contract (not activated)
 
 The concrete contract for review is in [TRUST-CONTRACT.md](TRUST-CONTRACT.md).
@@ -108,8 +167,9 @@ Use the existing server Go module **only as a build harness** for the public v1
 types (no `server/internal` imports). From `server`:
 
 ```powershell
-go test ..\extensions\runtime-manager\executor\contract.go ..\extensions\runtime-manager\executor\executor.go ..\extensions\runtime-manager\executor\journal.go ..\extensions\runtime-manager\executor\executor_test.go -count=1 -timeout 90s -v
-go vet ..\extensions\runtime-manager\executor\contract.go ..\extensions\runtime-manager\executor\executor.go ..\extensions\runtime-manager\executor\journal.go
+$files = Get-ChildItem -LiteralPath ..\extensions\runtime-manager\executor -Filter '*.go' | ForEach-Object { $_.FullName }
+go test @files -count=1 -timeout 90s -v
+go vet @files
 ```
 
 This explicit external selection is absent from default Go/frontend builds.
