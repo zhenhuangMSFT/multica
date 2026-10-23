@@ -78,10 +78,15 @@ Mixed/unresolved owners are still rejected.
 Failed/ambiguous Redis publication never rolls back committed server closure.
 An unresolved command cannot be superseded during its five-minute result window.
 After that window, fresh local status plus an explicit recovery can reconcile
-either the pending expected generation or its one-step local successor; no
-other jump or uncertain release is allowed. If an acquire never reached the
-daemon and its local gate is still open, an explicitly chosen new acquire at the
-same expected generation can reconcile it after that window. This is not an
+the confirmed generation, pending expected generation or its one-step local
+successor, never below the confirmed generation. Pending expectations live in
+the bound delivery and never advance the confirmed generation. A rejected first
+acquire therefore cannot raise the initial confirmed floor of zero; a rejected
+successor recovery cannot prevent reconciliation at the last confirmed
+generation. Rejection alone never opens admission or lowers that floor. If an
+acquire never reached the daemon and its local gate is still open, an explicitly
+chosen new acquire at the confirmed generation can reconcile it after that
+window. No arbitrary jump or uncertain release is allowed. This is not an
 automatic retry. A profile first enrolled with already-held local state requires
 recovery; an unrecorded server release is refused.
 
@@ -172,7 +177,7 @@ submit a new `status` command for a fresh observation.
 
 ## Durable replay and ambiguous outcomes
 
-Before execution, the daemon exclusively creates/syncs an immutable
+Before mutation execution, the daemon exclusively creates/syncs an immutable
 `maintenance-commands/<uuid>.intent` in its profile. A separate bound `.result`
 is created/synced after the local transition. Identical completed replay returns
 the saved result without execution, including after restart. Changed payloads
@@ -183,8 +188,19 @@ admission and requires explicit recovery, including when release committed but
 its result did not. A successful newer recovery generation supersedes that old
 uncertainty; replay of the old ID still cannot execute again. Failed receipt
 storage latches the running process closed. Torn, inaccessible, orphaned or
-binding-mismatched receipts fail startup. The 1,024-command receipt limit requires
+binding-mismatched receipts fail startup. The 1,024-mutation receipt limit requires
 reviewed offline archival on exhaustion, never automatic deletion/reset.
+
+Fresh status commands take no mutation receipts and write no admission journal
+or fence. They report the current observation, including any existing
+persistence fault, without consuming the mutation budget. A status ID colliding
+with a retained mutation still conflicts; observations never evict or execute
+ambiguous mutation intents. Backend request/result retention remains unchanged.
+
+These source corrections do not rewrite or delete any state already produced by
+an older build. In particular, an inflated persisted generation is not silently
+lowered, and a previously manufactured fence is not silently removed. Any such
+state needs separately reviewed, version-specific reconciliation before rollout.
 
 After ambiguous transport failure, read the original request ID. Do not generate
 a replacement acquisition/release as an automatic retry. An indeterminate result

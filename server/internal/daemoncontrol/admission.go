@@ -35,7 +35,7 @@ func NewPostgresAdmission(pool admissionTxStarter) *PostgresAdmission {
 type admissionState struct {
 	Version    int                             `json:"version"`
 	Closed     bool                            `json:"closed"`
-	Generation uint64                          `json:"generation"`
+	Generation uint64                          `json:"generation"` // Confirmed only; pending expectations belong to Delivery.
 	Uncertain  bool                            `json:"uncertain"`
 	Delivery   lifecyclev1.MaintenanceDelivery `json:"delivery"`
 	Result     *lifecyclev1.MaintenanceResult  `json:"result"`
@@ -76,8 +76,10 @@ func (s *admissionState) prepare(d lifecyclev1.MaintenanceDelivery, now time.Tim
 			return ErrConflict
 		}
 	case "recover":
+		pending := s.Delivery.Command.Generation
+		matchesPending := c.Generation == pending || (pending < math.MaxUint64 && c.Generation == pending+1)
 		if !s.Closed || c.Generation < s.Generation ||
-			(c.Generation != s.Generation && (!s.Uncertain || s.Generation == math.MaxUint64 || c.Generation != s.Generation+1)) {
+			(c.Generation != s.Generation && (!s.Uncertain || !matchesPending)) {
 			return ErrConflict
 		}
 	case "release":
@@ -87,7 +89,7 @@ func (s *admissionState) prepare(d lifecyclev1.MaintenanceDelivery, now time.Tim
 	default:
 		return ErrConflict
 	}
-	s.Closed, s.Uncertain, s.Generation, s.Delivery, s.Result = true, true, c.Generation, d, nil
+	s.Closed, s.Uncertain, s.Delivery, s.Result = true, true, d, nil
 	return nil
 }
 
@@ -107,7 +109,7 @@ func (s *admissionState) complete(r lifecyclev1.MaintenanceResult) error {
 	if r.Code == "ok" && !status.PersistenceFault && !status.RecoveryRequired {
 		switch c.Operation {
 		case "acquire", "recover":
-			if !status.Blocked || status.Generation != c.Generation+1 || status.Holder != c.Holder || !status.ExpiresAt.Equal(c.ExpiresAt) {
+			if !status.Blocked || status.Generation <= s.Generation || status.Generation != c.Generation+1 || status.Holder != c.Holder || !status.ExpiresAt.Equal(c.ExpiresAt) {
 				return ErrConflict
 			}
 			s.Generation, s.Uncertain = status.Generation, false
@@ -147,7 +149,7 @@ func (p *PostgresAdmission) update(ctx context.Context, d lifecyclev1.Maintenanc
 	}
 	var data []byte
 	err = tx.QueryRow(ctx, `SELECT state FROM daemon_maintenance_admission WHERE daemon_id=$1`, daemon).Scan(&data)
-	state := admissionState{Version: 1, Generation: d.Command.Generation, Delivery: d}
+	state := admissionState{Version: 1, Delivery: d}
 	if errors.Is(err, pgx.ErrNoRows) {
 		if d.Command.Operation != "status" && (!create || (d.Command.Operation != "acquire" && d.Command.Operation != "recover")) {
 			return ErrConflict

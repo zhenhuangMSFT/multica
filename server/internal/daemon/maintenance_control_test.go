@@ -238,3 +238,150 @@ func TestMaintenanceControlPollBoundedAndBackendOutage(t *testing.T) {
 }
 
 func maintenanceLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+func TestMaintenanceStatusObservationBudget(t *testing.T) {
+	for _, state := range []string{"never-maintained", "held", "ambiguous-mutation"} {
+		t.Run(state, func(t *testing.T) {
+			d, store, dir := maintenanceControlFixture(t)
+			var mutation lifecyclev1.MaintenanceDelivery
+			var original lifecyclev1.MaintenanceResult
+			if state != "never-maintained" {
+				mutation = maintenanceDelivery("acquire", 0)
+				original = d.executeMaintenance(mutation, time.Now())
+				if original.Code != "ok" {
+					t.Fatal(original)
+				}
+
+				if state == "ambiguous-mutation" {
+					mutation = maintenanceDelivery("recover", 1)
+					if err := d.maintenanceReceipts.write(".intent", maintenanceReceipt{Delivery: mutation}); err != nil {
+						t.Fatal(err)
+					}
+					if err := d.loadMaintenanceReceipts(dir); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			receiptsBefore := len(d.maintenanceReceipts.entries)
+			for i := 0; i < 1025; i++ {
+				got := d.executeMaintenance(maintenanceDelivery("status", 0), time.Now())
+				if got.Code != "ok" {
+					t.Errorf("distinct status %d caused %s (fault=%v, blocked=%v)", i+1, got.Code, got.Status.PersistenceFault, got.Status.Blocked)
+					break
+				}
+			}
+			if len(d.maintenanceReceipts.entries) != receiptsBefore {
+				t.Error("observations consumed mutation safety receipts")
+			}
+			if state == "never-maintained" {
+				if !d.tryEnterClaim() {
+					t.Error("status-only traffic blocked subsequent claiming")
+				} else {
+					d.exitClaim()
+				}
+				for _, path := range []string{store.path, store.path + ".held", dir} {
+					if _, err := os.Stat(path); !os.IsNotExist(err) {
+						t.Errorf("status-only traffic created durable maintenance state %s: %v", filepath.Base(path), err)
+					}
+				}
+			} else if d.tryEnterClaim() {
+				d.exitClaim()
+				t.Error("observations reopened held mutation admission")
+			}
+			restarted := &Daemon{cfg: d.cfg}
+			if err := restarted.initializeMaintenance(store); err != nil {
+				t.Fatalf("restart after status traffic failed: %v", err)
+			}
+			if err := restarted.loadMaintenanceReceipts(dir); err != nil {
+				t.Fatal(err)
+			}
+			if state == "never-maintained" {
+				if !restarted.tryEnterClaim() {
+					t.Fatal("status-only traffic prevented claims after restart")
+				}
+				restarted.exitClaim()
+			} else {
+				if restarted.tryEnterClaim() {
+					t.Fatal("held mutation admission lost after status traffic/restart")
+				}
+				got := restarted.executeMaintenance(mutation, time.Now())
+				if state == "held" && got != original {
+					t.Fatal("observations evicted durable mutation replay")
+				}
+				if state == "ambiguous-mutation" && got.Code != "outcome_unknown" {
+					t.Fatalf("observations lost ambiguous intent: %+v", got)
+				}
+			}
+		})
+	}
+}
+
+func TestMaintenanceMutationReceiptLimitStillFailsClosed(t *testing.T) {
+	d, store, dir := maintenanceControlFixture(t)
+	acquire := maintenanceDelivery("acquire", 0)
+	original := d.executeMaintenance(acquire, time.Now())
+	if original.Code != "ok" {
+		t.Fatal(original)
+	}
+	for i := 1; i < maintenanceReceiptLimit; i++ {
+		// Rejected mutations still need durable receipts: repeating an ID must
+		// never turn a previously rejected request into a fresh transition.
+		got := d.executeMaintenance(maintenanceDelivery("acquire", 0), time.Now())
+		if got.Code != "rejected" || got.Status.PersistenceFault {
+			t.Fatalf("mutation %d: %+v", i+1, got)
+		}
+	}
+	status := d.executeMaintenance(maintenanceDelivery("status", 0), time.Now())
+	if status.Code != "ok" || !status.Status.Blocked || status.Status.Generation != 1 {
+		t.Fatalf("full mutation budget prevented observation or lost holder: %+v", status)
+	}
+	overflow := maintenanceDelivery("release", 1)
+	got := d.executeMaintenance(overflow, time.Now())
+	if got.Code != "persistence_fault" || !got.Status.Blocked || !got.Status.PersistenceFault || got.Status.Generation != 1 || d.tryEnterClaim() {
+		t.Fatalf("mutation budget exhaustion did not fail closed: %+v", got)
+	}
+	if replay := d.executeMaintenance(acquire, time.Now()); replay != original {
+		t.Fatal("budget exhaustion discarded confirmed mutation replay")
+	}
+	restarted := &Daemon{cfg: d.cfg}
+	if err := restarted.initializeMaintenance(store); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.loadMaintenanceReceipts(dir); err != nil {
+		t.Fatal(err)
+	}
+	if len(restarted.maintenanceReceipts.entries) != maintenanceReceiptLimit || restarted.tryEnterClaim() {
+		t.Fatal("restart lost mutation retention or reopened held admission")
+	}
+	if replay := restarted.executeMaintenance(acquire, time.Now()); replay != original {
+		t.Fatal("durable mutation replay lost at quota across restart")
+	}
+	if result := restarted.executeMaintenance(overflow, time.Now()); result.Code != "persistence_fault" || !result.Status.Blocked {
+		t.Fatalf("restart bypassed full mutation budget: %+v", result)
+	}
+}
+
+func TestMaintenanceStatusPreservesMutationBindingAndFault(t *testing.T) {
+	d, _, _ := maintenanceControlFixture(t)
+	acquire := maintenanceDelivery("acquire", 0)
+	original := d.executeMaintenance(acquire, time.Now())
+	if original.Code != "ok" {
+		t.Fatal(original)
+	}
+	collision := maintenanceDelivery("status", 0)
+	collision.Command.ID = acquire.Command.ID
+	if got := d.executeMaintenance(collision, time.Now()); got.Code != "rejected" {
+		t.Fatalf("status bypassed retained mutation ID binding: %+v", got)
+	}
+	if got := d.executeMaintenance(acquire, time.Now()); got != original {
+		t.Fatal("colliding observation altered mutation replay")
+	}
+	d.maintenancePersistenceFailed(io.ErrUnexpectedEOF)
+	status := d.executeMaintenance(maintenanceDelivery("status", 0), time.Now())
+	if status.Code != "persistence_fault" || !status.Status.PersistenceFault || !status.Status.Blocked || status.Status.Generation != 1 {
+		t.Fatalf("observation hid or cleared an existing fault: %+v", status)
+	}
+	if len(d.maintenanceReceipts.entries) != 1 || d.tryEnterClaim() {
+		t.Fatal("fault observation changed receipts or reopened admission")
+	}
+}

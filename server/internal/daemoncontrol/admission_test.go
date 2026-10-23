@@ -3,6 +3,7 @@ package daemoncontrol
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -208,6 +209,7 @@ func TestMaintenanceFencedStoreFailures(t *testing.T) {
 	if _, err := store.Create(ctx, d); err == nil || backend.created != 0 {
 		t.Fatal("delivered without persisting server closure")
 	}
+
 	if delivered, err := store.Deliver(ctx, d); err == nil || delivered {
 		t.Fatal("delivery bypassed repository failure")
 	}
@@ -233,5 +235,76 @@ func TestMaintenanceFencedStoreFailures(t *testing.T) {
 	repository.err = nil
 	if err := store.Complete(ctx, r); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMaintenanceAdmissionPendingExpectationDoesNotConfirmGeneration(t *testing.T) {
+	now := time.Now().UTC()
+	for _, confirmed := range []uint64{1, 8} {
+		t.Run(fmt.Sprint(confirmed), func(t *testing.T) {
+			s := confirmedAdmission()
+			s.Generation, s.Uncertain, s.Result = confirmed, true, nil
+			s.Delivery.Command.Generation = confirmed
+			s.Delivery.Command.IssuedAt = now.Add(-18 * time.Minute)
+			rejected := admissionDelivery("recover", confirmed+1)
+			rejected.Command.IssuedAt = now.Add(-12 * time.Minute)
+			if err := s.prepare(rejected, now); err != nil || s.Generation != confirmed {
+				t.Fatalf("pending generation became confirmed: %v, %+v", err, s)
+			}
+			result := admissionResult(rejected)
+			result.Code, result.Status.Generation = "rejected", confirmed
+			if err := s.complete(result); err != nil || s.Generation != confirmed || !s.Uncertain || !s.Closed {
+				t.Fatalf("rejection changed confirmed state: %v, %+v", err, s)
+			}
+			for _, field := range []string{"owner", "daemon", "stale-generation", "release"} {
+				candidate := admissionDelivery("recover", confirmed)
+				switch field {
+				case "owner":
+					candidate.OwnerID = fixtureOther
+				case "daemon":
+					candidate.Command.DaemonID = "other"
+				case "stale-generation":
+					candidate.Command.Generation--
+				case "release":
+					candidate.Command.Operation = "release"
+				}
+				copy := s
+				if !errors.Is(copy.prepare(candidate, now), ErrConflict) || copy.Generation != confirmed || !copy.Closed {
+					t.Fatalf("reconciliation bypassed %s binding: %+v", field, copy)
+				}
+			}
+			corrected := admissionDelivery("recover", confirmed)
+			if err := s.prepare(corrected, now); err != nil || s.Generation != confirmed {
+				t.Fatalf("actual generation reconciliation failed: %v, %+v", err, s)
+			}
+			if err := s.complete(admissionResult(corrected)); err != nil || s.Generation != confirmed+1 || s.Uncertain || !s.Closed {
+				t.Fatalf("positive recovery not confirmed: %v, %+v", err, s)
+			}
+			if !errors.Is(s.complete(result), ErrConflict) {
+				t.Fatal("late rejected expectation overwrote confirmed recovery")
+			}
+		})
+	}
+}
+
+func TestMaintenanceAdmissionRepeatedUnacknowledgedSuccessors(t *testing.T) {
+	now := time.Now().UTC()
+	s := confirmedAdmission()
+	s.Uncertain, s.Result = true, nil
+	s.Delivery.Command.IssuedAt = now.Add(-18 * time.Minute)
+	first := admissionDelivery("recover", 1)
+	first.Command.IssuedAt = now.Add(-12 * time.Minute)
+	if err := s.prepare(first, now); err != nil || s.Generation != 1 {
+		t.Fatalf("first unacknowledged recovery: %v, %+v", err, s)
+	}
+	next := admissionDelivery("recover", 2)
+	if err := s.prepare(next, now); err != nil || s.Generation != 1 {
+		t.Fatalf("pending successor lost after second missing acknowledgment: %v, %+v", err, s)
+	}
+	if err := s.complete(admissionResult(next)); err != nil || s.Generation != 3 || s.Uncertain || !s.Closed {
+		t.Fatalf("successor acknowledgment: %v, %+v", err, s)
+	}
+	if !errors.Is(s.complete(admissionResult(first)), ErrConflict) || s.Generation != 3 {
+		t.Fatal("delayed acknowledgment lowered confirmed generation")
 	}
 }

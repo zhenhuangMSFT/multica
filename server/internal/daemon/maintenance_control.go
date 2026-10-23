@@ -195,6 +195,15 @@ func (d *Daemon) executeMaintenance(delivery lifecyclev1.MaintenanceDelivery, no
 		}
 		return result
 	}
+	// Observations do not mutate admission and need no durable replay receipt.
+	// In particular, diagnostics must not exhaust the mutation safety budget.
+	if command.Operation == "status" {
+		result.Code, result.Status = "ok", status
+		if status.PersistenceFault {
+			result.Code = "persistence_fault"
+		}
+		return result
+	}
 	intent := maintenanceReceipt{Delivery: delivery}
 	if len(receipts.entries) >= maintenanceReceiptLimit {
 		d.maintenancePersistenceFailed(errors.New("maintenance receipt limit reached"))
@@ -209,7 +218,6 @@ func (d *Daemon) executeMaintenance(delivery lifecyclev1.MaintenanceDelivery, no
 	receipts.entries[command.ID] = intent
 	var err error
 	switch command.Operation {
-	case "status":
 	case "acquire":
 		_, err = d.acquireMaintenance(command.Holder, command.Generation, command.ExpiresAt, now)
 	case "recover":
