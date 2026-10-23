@@ -372,7 +372,12 @@ func (t *Transport) ReceiveRequest(ctx context.Context) (Request, error) {
 			if err := authorized.Err(); err != nil {
 				return err
 			}
-			return frame.Request.validate(t.authority.Now())
+			_, cancelFinal, err := frame.Request.authorizedContext(authorized, t.authority.Now())
+			if err != nil {
+				return err
+			}
+			cancelFinal()
+			return nil
 		})
 	})
 	if err != nil {

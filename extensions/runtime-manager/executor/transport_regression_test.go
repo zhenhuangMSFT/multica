@@ -125,11 +125,11 @@ func TestTransportAbsentIntermediates(t *testing.T) {
 }
 
 func TestTransportFinalRequestAuthorization(t *testing.T) {
-	for _, limit := range []string{"hold", "observation", "hold-timer", "observation-timer"} {
+	for _, limit := range []string{"hold", "observation", "hold-boundary", "observation-boundary", "hold-timer", "observation-timer"} {
 		t.Run(limit, func(t *testing.T) {
 			a := newAuthorityFixture(t)
 			expires := a.f.now.Add(100 * time.Millisecond)
-			if limit == "hold" || limit == "hold-timer" {
+			if limit == "hold" || limit == "hold-boundary" || limit == "hold-timer" {
 				a.r.Core.Status.ExpiresAt = expires
 				a.r.Core.Delivery.Command.ExpiresAt = expires
 			} else {
@@ -161,6 +161,9 @@ func TestTransportFinalRequestAuthorization(t *testing.T) {
 							// retained real context timer can refuse this completion.
 							<-time.After(max(remaining, 0) + 10*time.Millisecond)
 							return a.f.now
+						}
+						if limit == "hold-boundary" || limit == "observation-boundary" {
+							return expires
 						}
 						return expires.Add(time.Nanosecond)
 					}
