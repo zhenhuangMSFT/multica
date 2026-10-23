@@ -17,6 +17,20 @@ var chatCmd = &cobra.Command{
 	Short: "Work with the current chat conversation",
 }
 
+var chatContextCmd = &cobra.Command{
+	Use:   "context",
+	Short: "Resolve the originating direct chat from this task's persisted provenance",
+	Long: `Resolve the nearest originating direct chat through this task's persisted
+delegation or automatic-retry chain. Optionally verify that an exact source
+message belongs to that chat task's input. Returns identifiers only, never a
+transcript, a send capability, or evidence of approval. Unrelated sessions,
+manual reruns without delegation, missing provenance, and IM channels are refused.
+
+This command requires a task token. It does not configure forwarding.`,
+	Args: cobra.NoArgs,
+	RunE: runChatContext,
+}
+
 var chatHistoryCmd = &cobra.Command{
 	Use:   "history",
 	Short: "Overview of the channel this conversation is in (messages + thread list)",
@@ -48,6 +62,9 @@ channel.`,
 }
 
 func init() {
+	chatContextCmd.Flags().String("source-message", "", "Verify an exact source chat message ID (not consent)")
+	chatContextCmd.Flags().String("output", "json", "Output format: table or json")
+	chatCmd.AddCommand(chatContextCmd)
 	for _, c := range []*cobra.Command{chatHistoryCmd, chatThreadCmd} {
 		c.Flags().Int("limit", 0, "Maximum number of messages to return (the server clamps the range)")
 		c.Flags().String("before", "", "Opaque cursor (a next_cursor from a prior page) to read older messages")
@@ -55,6 +72,31 @@ func init() {
 	}
 	chatCmd.AddCommand(chatHistoryCmd)
 	chatCmd.AddCommand(chatThreadCmd)
+}
+
+func runChatContext(cmd *cobra.Command, _ []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	messageID, _ := cmd.Flags().GetString("source-message")
+	path := "/api/chat/context"
+	if messageID != "" {
+		path += "?" + url.Values{"source_message_id": {messageID}}.Encode()
+	}
+	var response map[string]any
+	if err := client.GetJSON(ctx, path, &response); err != nil {
+		return fmt.Errorf("resolve source chat: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		cli.PrintTable(os.Stdout, []string{"CHAT_SESSION_ID", "SOURCE_TASK_ID", "SOURCE_MESSAGE_ID", "OWNER_ID"},
+			[][]string{{strVal(response, "chat_session_id"), strVal(response, "source_task_id"), strVal(response, "source_message_id"), strVal(response, "owner_id")}})
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, response)
 }
 
 func runChatHistory(cmd *cobra.Command, _ []string) error {
