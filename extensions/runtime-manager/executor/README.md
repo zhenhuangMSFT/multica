@@ -3,9 +3,10 @@
 **Implemented library and isolated adapters, not an installed host service.**
 This optional source package owns launch serialization, durable attempt/replay
 state, unknown-child reconciliation and one-use replacement. No core package
-imports it. Injected certificate/message verification is implemented; production
-transport and trusted enrollment/decision/human-approval sources, Windows process
-creation, service hosting, protected storage and the external manager are unavailable.
+imports it. Injected certificate/message verification and connection-bound TLS
+framing are implemented; production dialing/hosting, credential and trusted
+enrollment/decision/human-approval sources, Windows process creation, service
+hosting, protected storage and the external manager are unavailable.
 
 ## Implemented contract
 
@@ -165,6 +166,67 @@ honor bounded contexts; cancellation is rechecked after their return. Production
 atomic revocation/source consistency and revocation during already accepted
 local work remain unqualified. There is no claim of instantaneous revocation
 of an in-flight launch or any new process cancellation.
+
+## Connection-bound TLS framing
+
+`OpenTransport` takes ownership of an already supplied `net.Conn`, a manager or
+executor role, an injected approved `TLSCredentialSource`, the reviewed authority
+providers and a positive timeout capped at 30 seconds. It neither dials nor
+listens. The executor is the outbound TLS client; the manager is the mutually
+authenticated TLS server. A fresh TLS configuration requires explicit roots,
+local certificate/key and manager DNS name; TLS 1.3 is mandatory and normal
+certificate verification cannot be disabled. There are no callback overrides,
+system trust fallbacks or production credential providers.
+
+Peer evidence comes only from that session's completed verified `tls.Conn`.
+The transport replaces any caller-provided authority `ChannelSource` with a
+private receiving-connection source. Executor requests see only the manager
+peer; manager results see only the executor peer. Sending also verifies the
+enrolled opposite peer before disclosing signed data. Enrollment, decision,
+human approval, pin/URI/DNS/role, expiry and revocation checks remain unchanged.
+
+`runtime-manager-executor/v1/transport` frames have a four-byte unsigned
+big-endian body length followed by **1..16,384 bytes** of strict JSON. Request
+bodies contain `contract`, `request` and `authority`; result bodies contain
+`contract`, `outcome` and `authority`. They reuse the current typed contracts
+unchanged. Limits apply before allocation on reads and before sending on writes.
+Unknown/duplicate/missing/null fields, malformed/trailing JSON, wrong versions,
+truncated bodies, wrong signatures and mismatched expected results are refused.
+The result receiver always supplies its original expected request, never one
+selected by a received actor or operation ID.
+
+Handshake, source callbacks, frame reads/writes and authority checks share bounded
+contexts and connection deadlines. Known requests additionally use the earliest
+live request/observation/hold/parent budget. Cancellation interrupts the owned
+connection; failed I/O or verification poisons/closes the session rather than
+attempting to resynchronize a partial stream. Session operations serialize with
+cancellable acquisition. Raw connection close is used for bounded cleanup, not
+a potentially blocking TLS close-notify exchange.
+
+`SendRequest`/`ReceiveRequest` and `SendResult`/`ReceiveResult` are explicit:
+**no automatic dispatch, execution or retry** occurs. `Transport.Verify` lets
+the existing executor recheck accepted request authority against its real
+connection; it does not bypass the executor journal or serializer. Source
+fixtures use only fake process adapters. Production process adapters stay
+unavailable.
+
+Failed sends or result reception return `TransportError` with the existing
+`OperationID` and `ErrUnknown`. They are conservative even when no bytes may
+have left: a timeout/disconnect is not proof that a child did not run. Reconnect
+and reconcile **the exact same request ID and bytes** against retained receipts;
+do not mint a new launch/transaction or automatically retry an OS action.
+Within its live authorization window the existing executor returns a signed
+historical receipt without another process call. Expired/rotated requests need
+future authenticated manager history, not renewed execution under this API.
+This source increment adds no production durable manager history endpoint.
+
+Fixtures perform real mutual TLS over `net.Pipe`, with ephemeral in-memory
+certificates, no socket/listener and no production account/key. Tests cover both
+perspectives, exact/oversized frame limits, malformed/truncated/forged frames,
+wrong roots/DNS/pins, cancellation and deadline phases, results expiring during
+read and lost-response reconciliation with one fake child creation. This
+qualifies isolated source behavior, not production networking, key custody,
+host enrollment or Windows process execution.
 
 ## Proposed production trust contract (not activated)
 

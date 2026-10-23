@@ -23,7 +23,7 @@ owner credential forwarding.
 | `extensions/runtime-manager/scripts/windows-worker` | Guarded optional logon installer and existing direct-launch wrapper; not an atomic maintenance-aware supervisor. |
 | `extensions/runtime-manager/scripts/daemon-maintenance` | Pure lifecycle policy, read-only snapshots, simulation-only transactions, evidence validation and external executor design. |
 | `plugin` | Optional manifest-v1 offline sidebar UI: sanitized unavailable status, static plans and local proposal drafts. No service endpoint, grant, lifecycle action or installation implied. |
-| `executor` | Persistent serialized launch/maintenance library, exact one-use replacement, replay/unknown-child recovery and injected certificate/message verification. Production trust sources, transport and Windows execution remain unavailable. |
+| `executor` | Persistent serialized launch/maintenance library, exact one-use replacement, replay/unknown-child recovery, injected authority verification and bounded connection-bound TLS framing. Production hosting/dialing, trust/credential providers and Windows execution remain unavailable. |
 
 Generic reservation/claim fencing and authenticated owner control remain with
 Multica's backend/daemon. The public core contract is

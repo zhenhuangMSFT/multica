@@ -72,7 +72,8 @@ Revocation denies subsequent `Verify`, including stale responses and bootstrap
 opening. It does not kill an existing child or reopen maintenance. Binding/key
 rotation needs a human-approved, generation-preserving handoff with fresh
 incarnation and reconciliation; journal deletion/reinstallation is not rotation.
-The external manager/transport are not implemented; the default
+The production external manager, connection hosting/dialing and trusted
+credential/record providers are not implemented; the default
 `UnavailableAuthority` still returns `ErrUnavailable`. The optional
 `CertificateAuthority` now implements injected certificate/message verification,
 not production credential loading, human authentication, enrollment or transport.
@@ -89,6 +90,14 @@ serialization errors, including malformed typed timestamps, rather than hash
 empty bytes or accept a signature over a failed encoding.
 Injected configuration/record sources must be protected and authoritative,
 including current revocation; fake fixtures are not production providers.
+
+The optional [connection-bound framing adapter](README.md#connection-bound-tls-framing)
+now creates a normally verified TLS 1.3 session over an injected owned connection.
+It does not accept a supplied TLS state as peer evidence and does not listen,
+dial, provision a certificate or activate an executor. Bounded strict frames
+carry existing signed requests/results. Failed sends/lost responses remain
+unknown and reconcile by the original operation ID against durable receipts;
+no connection error authorizes a second process call.
 
 ## Local IPC, journal and receipts
 
