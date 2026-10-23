@@ -329,7 +329,11 @@ func TestExecutorStrictContractAndUnavailableAdapters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if parsed, err := DecodeRequest(bytes.NewReader(data)); err != nil || !sameRequest(parsed, open) {
+	parsed, err := DecodeRequest(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if same, err := sameRequest(parsed, open); err != nil || !same {
 		t.Fatal(parsed, err)
 	}
 	for _, edit := range []func(string) string{
@@ -658,7 +662,11 @@ func TestExecutorStoredSchemaAndReceiptLimit(t *testing.T) {
 	for len(f.e.state.Receipts) < 1024 {
 		r := launch
 		r.ID = uuid.NewString()
-		f.e.state.Receipts[r.ID] = receipt{r, f.e.result(r, "running", f.e.state.Attempts["daemon"].Child)}
+		out, err := f.e.result(r, "running", f.e.state.Attempts["daemon"].Child)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.e.state.Receipts[r.ID] = receipt{r, out}
 	}
 	if err := f.e.persist(); err != nil {
 		t.Fatal(err)
@@ -734,7 +742,7 @@ func TestExecutorHistoricalReceiptReload(t *testing.T) {
 					changed.Outcome.RequestDigest = strings.Repeat("0", 64)
 				}
 				if field != "digest" {
-					changed.Outcome.RequestDigest = requestDigest(changed.Request)
+					changed.Outcome.RequestDigest = testRequestDigest(t, changed.Request)
 				}
 				f.e.state.Receipts[r.ID] = changed
 				if err := f.e.validateState(f.binding, f.defs); !errors.Is(err, ErrDenied) {

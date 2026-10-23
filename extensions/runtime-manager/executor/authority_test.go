@@ -86,6 +86,7 @@ func fixtureCertificate(t *testing.T, now time.Time, identity string, usage x509
 }
 
 type authorityFixture struct {
+	t                          *testing.T
 	f                          *fixture
 	r                          Request
 	root, manager, participant certificateFixture
@@ -98,7 +99,7 @@ type authorityFixture struct {
 func newAuthorityFixture(t *testing.T) *authorityFixture {
 	t.Helper()
 	f := newFixture(t)
-	a := &authorityFixture{f: f, r: f.request("close")}
+	a := &authorityFixture{t: t, f: f, r: f.request("close")}
 	a.root = fixtureCertificate(t, f.now, "", 0, nil)
 	managerURI, executorURI := "urn:multica:fixture:manager:"+uuid.NewString(), "urn:multica:fixture:executor:"+f.binding.Installation
 	a.manager = fixtureCertificate(t, f.now, managerURI, x509.ExtKeyUsageServerAuth, &a.root)
@@ -144,23 +145,46 @@ func newAuthorityFixture(t *testing.T) *authorityFixture {
 }
 
 func (a *authorityFixture) message(result *Outcome) SignedAuthority {
+	a.t.Helper()
 	cert, kind, audience := a.manager, decisionKind(a.r), a.enrollment.ExecutorFingerprint
 	digest := ""
 	if result != nil {
 		cert, kind, audience = a.participant, "participant-result", a.enrollment.ManagerFingerprint
-		digest = outcomeDigest(*result)
+		var err error
+		digest, err = outcomeDigest(*result)
+		if err != nil {
+			a.t.Fatal(err)
+		}
 	}
-	m := SignedAuthority{Contract: AuthorityContract, Kind: kind, RequestID: a.r.ID, RequestDigest: requestDigest(a.r),
+	m := SignedAuthority{Contract: AuthorityContract, Kind: kind, RequestID: a.r.ID, RequestDigest: testRequestDigest(a.t, a.r),
 		OutcomeDigest: digest, Audience: audience, Issued: a.f.now, Expires: a.r.Expires,
 		Certificate: cert.der, Intermediates: [][]byte{}}
-	m.Signature = ed25519.Sign(cert.key, m.SigningBytes())
+	m.Signature = ed25519.Sign(cert.key, testSigningBytes(a.t, m))
 	return m
 }
 
 func (a *authorityFixture) authorize() {
 	a.decision = CommittedDecision{Committed: true, Message: a.message(nil)}
 	a.human = HumanApproval{AuthenticatedHuman: true, OwnerID: a.r.Binding.OwnerID,
-		RequestID: a.r.ID, RequestDigest: requestDigest(a.r), Expires: a.r.Expires}
+		RequestID: a.r.ID, RequestDigest: testRequestDigest(a.t, a.r), Expires: a.r.Expires}
+}
+
+func testRequestDigest(t *testing.T, r Request) string {
+	t.Helper()
+	digest, err := requestDigest(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return digest
+}
+
+func testSigningBytes(t *testing.T, m SignedAuthority) []byte {
+	t.Helper()
+	data, err := m.SigningBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
 
 func TestAuthorityExactRequestAndParticipantResult(t *testing.T) {
@@ -320,7 +344,7 @@ func TestAuthorityDecisionHumanAndReplayBindings(t *testing.T) {
 			}
 			// Re-sign altered claims so negative checks test policy, not just a
 			// broken signature. A signed participant still cannot grant human rights.
-			a.decision.Message.Signature = ed25519.Sign(a.manager.key, a.decision.Message.SigningBytes())
+			a.decision.Message.Signature = ed25519.Sign(a.manager.key, testSigningBytes(t, a.decision.Message))
 			if err := a.adapter.Verify(context.Background(), a.r); !errors.Is(err, want) {
 				t.Fatal("invalid decision/human binding accepted:", field, err)
 			}
@@ -350,7 +374,7 @@ func TestAuthorityParticipantCannotGrantReplacement(t *testing.T) {
 	}
 	a.human.AuthenticatedHuman = true
 	a.decision.Message.Certificate = a.participant.der
-	a.decision.Message.Signature = ed25519.Sign(a.participant.key, a.decision.Message.SigningBytes())
+	a.decision.Message.Signature = ed25519.Sign(a.participant.key, testSigningBytes(t, a.decision.Message))
 	if err := a.adapter.Verify(context.Background(), a.r); !errors.Is(err, ErrDenied) {
 		t.Fatal("participant certificate issued replacement grant", err)
 	}
@@ -414,7 +438,7 @@ func TestAuthorityOperationAndExactByteBinding(t *testing.T) {
 			case "core-result":
 				a.r.Core.Status.ActiveTasks++
 			}
-			a.human.RequestDigest = requestDigest(a.r)
+			a.human.RequestDigest = testRequestDigest(t, a.r)
 			if err := a.adapter.Verify(context.Background(), a.r); err == nil {
 				t.Fatal("changed exact request accepted", field)
 			}
@@ -482,7 +506,7 @@ func TestAuthorityResultBindings(t *testing.T) {
 			switch field {
 			case "manager-as-executor":
 				message.Certificate = a.manager.der
-				message.Signature = ed25519.Sign(a.manager.key, message.SigningBytes())
+				message.Signature = ed25519.Sign(a.manager.key, testSigningBytes(t, message))
 			case "wrong-executor-uri":
 				a.participant = fixtureCertificate(t, a.f.now, "urn:other:executor", x509.ExtKeyUsageClientAuth, &a.root)
 				a.enrollment.ExecutorFingerprint = certificateFingerprint(a.participant.der)
@@ -514,10 +538,10 @@ func TestAuthorityResultBindings(t *testing.T) {
 				out.RequestDigest = strings.Repeat("0", 64)
 			case "old-request":
 				message.RequestID = uuid.NewString()
-				message.Signature = ed25519.Sign(a.participant.key, message.SigningBytes())
+				message.Signature = ed25519.Sign(a.participant.key, testSigningBytes(t, message))
 			case "wrong-audience":
 				message.Audience = a.enrollment.ExecutorFingerprint
-				message.Signature = ed25519.Sign(a.participant.key, message.SigningBytes())
+				message.Signature = ed25519.Sign(a.participant.key, testSigningBytes(t, message))
 			case "bad-signature":
 				message.Signature[0] ^= 1
 			}

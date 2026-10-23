@@ -122,6 +122,11 @@ JSON containing contract, kind, request ID/digest, outcome digest, recipient
 certificate fingerprint, issue time and expiry. Digests are SHA-256 of Go JSON
 encoding of the existing typed `Request`/`Outcome`; the full request includes
 the unchanged core proof, definition, transaction, scope and incarnation.
+Digest and signing helpers return serialization errors; failed JSON encoding
+never produces a digest or signing input. Outcome validation also rejects
+unencodable child timestamps, including unknown outcomes, before signature
+acceptance. Altering child or historical fields cannot preserve a malformed
+outcome's signature by collapsing encoding failures to empty bytes.
 Messages must expire at the request deadline, have at most one minute of
 validity and never be future-issued. Enrollment, certificates and human approval
 must cover that deadline, so a shorter credential cannot extend execution's
@@ -141,6 +146,15 @@ outcome digest and existing `Outcome.Validate` after rechecking the committed
 request authorization. The result signature is delivery provenance, **not** a
 replacement grant, complete-drain attestation or proof of an actual OS action.
 Historical flags are signed and stay historical.
+
+Enrollment, committed-decision, human-approval and signed manager-decision checks
+are endpoint-independent. Executor-side `Verify` additionally requests only the
+`manager` peer state (manager server identity). Manager-side `VerifyResult`
+requests only the `executor` peer state (executor client identity); it neither
+calls request acceptance nor asks for the other endpoint's view of the TLS
+connection. Fixtures include a real mutually authenticated TLS 1.3 handshake
+over `net.Pipe`, using ephemeral keys with no network socket, and supply each
+receiver only its own connection state.
 
 Every verification reads current authoritative revocation/decision records;
 there is no grant cache or in-memory nonce consumption. Exact live duplicates

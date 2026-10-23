@@ -25,14 +25,28 @@ type Outcome struct {
 	Coverage      string `json:"remote_coverage"`
 }
 
-func requestDigest(r Request) string {
-	data, _ := json.Marshal(r)
+func digestJSON(value any) (string, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "", errors.Join(ErrDenied, err)
+	}
 	hash := sha256.Sum256(data)
-	return hex.EncodeToString(hash[:])
+	return hex.EncodeToString(hash[:]), nil
+}
+
+func requestDigest(r Request) (string, error) {
+	return digestJSON(r)
 }
 
 func (o Outcome) Validate(r Request) error {
-	if o.RequestID != r.ID || o.RequestDigest != requestDigest(r) || o.Incarnation != r.Incarnation ||
+	digest, err := requestDigest(r)
+	if err != nil {
+		return err
+	}
+	if _, err := digestJSON(o); err != nil {
+		return err
+	}
+	if o.RequestID != r.ID || o.RequestDigest != digest || o.Incarnation != r.Incarnation ||
 		o.Generation != r.Generation || o.Epoch != r.Epoch || o.CompleteDrain || o.Production || o.Coverage != "unknown" {
 		return ErrDenied
 	}
@@ -195,19 +209,37 @@ func (e *Executor) Close() error {
 	return e.store.Close()
 }
 
-func sameRequest(a, b Request) bool {
-	x, _ := json.Marshal(a)
-	y, _ := json.Marshal(b)
-	return string(x) == string(y)
+func sameRequest(a, b Request) (bool, error) {
+	x, err := json.Marshal(a)
+	if err != nil {
+		return false, errors.Join(ErrDenied, err)
+	}
+	y, err := json.Marshal(b)
+	if err != nil {
+		return false, errors.Join(ErrDenied, err)
+	}
+	return string(x) == string(y), nil
 }
 
-func (e *Executor) result(r Request, status string, child Child) Outcome {
-	return Outcome{RequestID: r.ID, RequestDigest: requestDigest(r), Incarnation: r.Incarnation,
+func (e *Executor) result(r Request, status string, child Child) (Outcome, error) {
+	digest, err := requestDigest(r)
+	if err != nil {
+		return Outcome{}, err
+	}
+	out := Outcome{RequestID: r.ID, RequestDigest: digest, Incarnation: r.Incarnation,
 		State: status, Child: child, Generation: e.state.Generation, Epoch: e.state.Epoch, Coverage: "unknown"}
+	if err := out.Validate(r); err != nil {
+		return Outcome{}, err
+	}
+	return out, nil
 }
 
 func (e *Executor) finish(r Request, status string, child Child) (Outcome, error) {
-	out := e.result(r, status, child)
+	out, err := e.result(r, status, child)
+	if err != nil {
+		e.fault = err
+		return Outcome{}, err
+	}
 	e.state.Receipts[r.ID] = receipt{r, out}
 	return out, e.persist()
 }
@@ -241,7 +273,11 @@ func (e *Executor) Execute(ctx context.Context, r Request) (Outcome, error) {
 		return Outcome{}, ErrDenied
 	}
 	if old, exists := e.state.Receipts[r.ID]; exists {
-		if !sameRequest(old.Request, r) {
+		same, err := sameRequest(old.Request, r)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if !same {
 			return Outcome{}, ErrDenied
 		}
 		out := old.Outcome

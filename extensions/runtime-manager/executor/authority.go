@@ -98,8 +98,8 @@ func DecodeSignedAuthority(reader io.Reader) (SignedAuthority, error) {
 
 // SigningBytes is also the interoperable signing input for injected fixtures.
 // Certificate/signature transport encodings do not alter the signed statement.
-func (m SignedAuthority) SigningBytes() []byte {
-	data, _ := json.Marshal(struct {
+func (m SignedAuthority) SigningBytes() ([]byte, error) {
+	data, err := json.Marshal(struct {
 		Contract      string    `json:"contract"`
 		Kind          string    `json:"kind"`
 		RequestID     string    `json:"request_id"`
@@ -109,7 +109,10 @@ func (m SignedAuthority) SigningBytes() []byte {
 		Issued        time.Time `json:"issued"`
 		Expires       time.Time `json:"expires"`
 	}{m.Contract, m.Kind, m.RequestID, m.RequestDigest, m.OutcomeDigest, m.Audience, m.Issued, m.Expires})
-	return data
+	if err != nil {
+		return nil, errors.Join(ErrDenied, err)
+	}
+	return data, nil
 }
 
 func certificateFingerprint(der []byte) string {
@@ -117,10 +120,8 @@ func certificateFingerprint(der []byte) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func outcomeDigest(out Outcome) string {
-	data, _ := json.Marshal(out)
-	hash := sha256.Sum256(data)
-	return hex.EncodeToString(hash[:])
+func outcomeDigest(out Outcome) (string, error) {
+	return digestJSON(out)
 }
 
 // CertificateAuthority has no network, credential loader, key or default roots.
@@ -145,56 +146,83 @@ func decisionKind(r Request) string {
 }
 
 func (a CertificateAuthority) Verify(ctx context.Context, r Request) error {
-	_, err := a.verify(ctx, r)
-	return err
-}
-
-func (a CertificateAuthority) verify(ctx context.Context, r Request) (Enrollment, error) {
-	if a.Enrollment == nil || a.Decisions == nil || a.Channels == nil || a.Now == nil {
-		return Enrollment{}, ErrUnavailable
+	if a.Now == nil || a.Channels == nil {
+		return ErrUnavailable
 	}
 	bounded, cancel, err := r.authorizedContext(ctx, a.Now())
 	if err != nil {
-		return Enrollment{}, err
+		return err
 	}
 	defer cancel()
-	enrollment, err := a.Enrollment.Enrollment(bounded)
+	records, err := a.verifyAuthorization(bounded, r)
 	if err != nil {
-		return Enrollment{}, errors.Join(ErrUnavailable, err)
-	}
-	if !enrollment.Approved || !enrollment.Active || len(enrollment.Roots) == 0 {
-		return Enrollment{}, ErrUnavailable
-	}
-	if err := bounded.Err(); err != nil {
-		return Enrollment{}, err
-	}
-	decision, err := a.Decisions.Decision(bounded, r.ID)
-	if err != nil {
-		return Enrollment{}, errors.Join(ErrUnavailable, err)
-	}
-	if err := bounded.Err(); err != nil {
-		return Enrollment{}, err
+		return err
 	}
 	channel, err := a.Channels.Channel(bounded, "manager")
 	if err != nil {
-		return Enrollment{}, errors.Join(ErrUnavailable, err)
+		return errors.Join(ErrUnavailable, err)
+	}
+	if err := bounded.Err(); err != nil {
+		return err
+	}
+	if !enrolledChannel(channel, records.decision.Message.Certificate) || channel.ServerName != records.enrollment.ManagerDNSName {
+		return ErrDenied
+	}
+	return r.validate(a.Now())
+}
+
+type authorizationRecords struct {
+	enrollment Enrollment
+	decision   CommittedDecision
+}
+
+// Shared record checks do not require either endpoint's transport perspective.
+func (a CertificateAuthority) verifyAuthorization(ctx context.Context, r Request) (authorizationRecords, error) {
+	if a.Enrollment == nil || a.Decisions == nil || a.Now == nil {
+		return authorizationRecords{}, ErrUnavailable
+	}
+	bounded, cancel, err := r.authorizedContext(ctx, a.Now())
+	if err != nil {
+		return authorizationRecords{}, err
+	}
+	defer cancel()
+	digest, err := requestDigest(r)
+	if err != nil {
+		return authorizationRecords{}, err
+	}
+	enrollment, err := a.Enrollment.Enrollment(bounded)
+	if err != nil {
+		return authorizationRecords{}, errors.Join(ErrUnavailable, err)
+	}
+	if !enrollment.Approved || !enrollment.Active || len(enrollment.Roots) == 0 {
+		return authorizationRecords{}, ErrUnavailable
+	}
+	if err := bounded.Err(); err != nil {
+		return authorizationRecords{}, err
+	}
+	decision, err := a.Decisions.Decision(bounded, r.ID)
+	if err != nil {
+		return authorizationRecords{}, errors.Join(ErrUnavailable, err)
+	}
+	if err := bounded.Err(); err != nil {
+		return authorizationRecords{}, err
 	}
 	var human HumanApproval
 	if decisionKind(r) == "human-maintenance" {
 		if a.Humans == nil {
-			return Enrollment{}, ErrUnavailable
+			return authorizationRecords{}, ErrUnavailable
 		}
 		if err := bounded.Err(); err != nil {
-			return Enrollment{}, err
+			return authorizationRecords{}, err
 		}
 		human, err = a.Humans.HumanApproval(bounded, r.ID)
 		if err != nil {
-			return Enrollment{}, errors.Join(ErrUnavailable, err)
+			return authorizationRecords{}, errors.Join(ErrUnavailable, err)
 		}
 	}
 	now := a.Now()
 	if err := bounded.Err(); err != nil {
-		return Enrollment{}, err
+		return authorizationRecords{}, err
 	}
 	if r.validate(now) != nil || enrollment.Binding != r.Binding || enrollment.Incarnation != r.Incarnation ||
 		!enrollment.ValidUntil.After(now) || enrollment.ValidUntil.Before(r.Expires) ||
@@ -202,34 +230,31 @@ func (a CertificateAuthority) verify(ctx context.Context, r Request) (Enrollment
 		enrollment.ManagerURI == enrollment.ExecutorURI ||
 		!digestPattern.MatchString(enrollment.ManagerFingerprint) || !digestPattern.MatchString(enrollment.ExecutorFingerprint) ||
 		enrollment.ManagerFingerprint == enrollment.ExecutorFingerprint || !decision.Committed || decision.Revoked {
-		return Enrollment{}, ErrDenied
+		return authorizationRecords{}, ErrDenied
 	}
 	if len(enrollment.RevokedCertificates) > 1024 {
-		return Enrollment{}, ErrDenied
+		return authorizationRecords{}, ErrDenied
 	}
 	for _, revoked := range enrollment.RevokedCertificates {
 		if !digestPattern.MatchString(revoked) || revoked == enrollment.ManagerFingerprint || revoked == enrollment.ExecutorFingerprint {
-			return Enrollment{}, ErrDenied
+			return authorizationRecords{}, ErrDenied
 		}
 	}
 	if decisionKind(r) == "human-maintenance" && (!human.AuthenticatedHuman || human.Revoked ||
-		human.OwnerID != r.Binding.OwnerID || human.RequestID != r.ID || human.RequestDigest != requestDigest(r) ||
+		human.OwnerID != r.Binding.OwnerID || human.RequestID != r.ID || human.RequestDigest != digest ||
 		human.Expires.Location() != time.UTC || !human.Expires.After(now) || human.Expires.Before(r.Expires)) {
-		return Enrollment{}, ErrDenied
+		return authorizationRecords{}, ErrDenied
 	}
 	if err := verifyAuthorityMessage(enrollment, decision.Message, r, decisionKind(r), "", now, false); err != nil {
-		return Enrollment{}, err
-	}
-	if !enrolledChannel(channel, decision.Message.Certificate) || channel.ServerName != enrollment.ManagerDNSName {
-		return Enrollment{}, ErrDenied
+		return authorizationRecords{}, err
 	}
 	if err := bounded.Err(); err != nil {
-		return Enrollment{}, err
+		return authorizationRecords{}, err
 	}
 	if r.validate(a.Now()) != nil {
-		return Enrollment{}, ErrDenied
+		return authorizationRecords{}, ErrDenied
 	}
-	return enrollment, nil
+	return authorizationRecords{enrollment: enrollment, decision: decision}, nil
 }
 
 // VerifyResult authenticates participant delivery, not maintenance permission.
@@ -237,18 +262,25 @@ func (a CertificateAuthority) verify(ctx context.Context, r Request) (Enrollment
 // A historical result stays historical; successful verification is no readiness
 // or OS-execution attestation.
 func (a CertificateAuthority) VerifyResult(ctx context.Context, r Request, out Outcome, message SignedAuthority) error {
-	enrollment, err := a.verify(ctx, r)
-	if err != nil {
+	if a.Now == nil || a.Channels == nil {
+		return ErrUnavailable
+	}
+	if err := out.Validate(r); err != nil {
 		return err
 	}
-	if out.Validate(r) != nil {
-		return ErrDenied
+	digest, err := outcomeDigest(out)
+	if err != nil {
+		return err
 	}
 	bounded, cancel, err := r.authorizedContext(ctx, a.Now())
 	if err != nil {
 		return err
 	}
 	defer cancel()
+	records, err := a.verifyAuthorization(bounded, r)
+	if err != nil {
+		return err
+	}
 	channel, err := a.Channels.Channel(bounded, "executor")
 	if err != nil {
 		return errors.Join(ErrUnavailable, err)
@@ -259,7 +291,7 @@ func (a CertificateAuthority) VerifyResult(ctx context.Context, r Request, out O
 	if !enrolledChannel(channel, message.Certificate) {
 		return ErrDenied
 	}
-	if err := verifyAuthorityMessage(enrollment, message, r, "participant-result", outcomeDigest(out), a.Now(), true); err != nil {
+	if err := verifyAuthorityMessage(records.enrollment, message, r, "participant-result", digest, a.Now(), true); err != nil {
 		return err
 	}
 	if err := bounded.Err(); err != nil {
@@ -278,14 +310,21 @@ func enrolledChannel(channel tls.ConnectionState, certificate []byte) bool {
 
 func verifyAuthorityMessage(e Enrollment, m SignedAuthority, r Request, kind, resultDigest string, now time.Time, result bool) error {
 	wire, err := json.Marshal(m)
-	if err != nil || len(wire) > lifecyclev1.MaintenanceBodyLimit {
+	if err != nil {
+		return errors.Join(ErrDenied, err)
+	}
+	if len(wire) > lifecyclev1.MaintenanceBodyLimit {
 		return ErrDenied
+	}
+	digest, err := requestDigest(r)
+	if err != nil {
+		return err
 	}
 	fingerprint, identity, audience, usage := e.ManagerFingerprint, e.ManagerURI, e.ExecutorFingerprint, x509.ExtKeyUsageServerAuth
 	if result {
 		fingerprint, identity, audience, usage = e.ExecutorFingerprint, e.ExecutorURI, e.ManagerFingerprint, x509.ExtKeyUsageClientAuth
 	}
-	if m.Contract != AuthorityContract || m.Kind != kind || m.RequestID != r.ID || m.RequestDigest != requestDigest(r) ||
+	if m.Contract != AuthorityContract || m.Kind != kind || m.RequestID != r.ID || m.RequestDigest != digest ||
 		m.OutcomeDigest != resultDigest || m.Audience != audience || m.Issued.Location() != time.UTC ||
 		m.Issued.IsZero() || m.Issued.After(now) || now.Sub(m.Issued) >= time.Minute ||
 		!m.Issued.Before(m.Expires) || !m.Expires.Equal(r.Expires) || m.Expires.Location() != time.UTC ||
@@ -299,7 +338,11 @@ func verifyAuthorityMessage(e Enrollment, m SignedAuthority, r Request, kind, re
 		return err
 	}
 	public, ok := cert.PublicKey.(ed25519.PublicKey)
-	if !ok || !ed25519.Verify(public, m.SigningBytes(), m.Signature) {
+	signingBytes, err := m.SigningBytes()
+	if err != nil {
+		return err
+	}
+	if !ok || !ed25519.Verify(public, signingBytes, m.Signature) {
 		return ErrDenied
 	}
 	return nil

@@ -81,6 +81,12 @@ specifies exact pins/URI/DNS roles, signed existing-contract digests, separate
 human approval, bounded current-source checks and historical replay semantics.
 Injected `ChannelSource` must supply actual completed, normally verified TLS 1.3
 state from the future transport, never a caller-authored peer/actor claim.
+Each receiver supplies only its actual peer: executor request acceptance checks
+the manager server; manager result acceptance checks the executor client.
+Shared authoritative-record verification does not require an opposite-endpoint
+channel. Signed result/request digests and signing inputs must refuse all
+serialization errors, including malformed typed timestamps, rather than hash
+empty bytes or accept a signature over a failed encoding.
 Injected configuration/record sources must be protected and authoritative,
 including current revocation; fake fixtures are not production providers.
 
