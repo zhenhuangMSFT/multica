@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "azure": {
+    "endpoint": "https://REPLACE.devcenter.azure.com",
+    "project": "REPLACE-project",
+    "pool": "REPLACE-approved-pool",
+    "name": "multica-worker-03"
+  },
+  "worker": {
+    "computerName": "REPLACE-HOST",
+    "profile": "multica-worker",
+    "serverUrl": "https://REPLACE-api.example.invalid",
+    "appUrl": "https://REPLACE-app.example.invalid",
+    "workspaceId": "11111111-1111-4111-8111-111111111111",
+    "workspacesRoot": "C:\\MulticaWorker\\workspaces",
+    "maxConcurrentTasks": 2,
+    "tools": {
+      "multica": { "path": "C:\\MulticaWorker\\bin\\multica.exe", "version": "0.6.3" },
+      "git": { "path": "C:\\Program Files\\Git\\cmd\\git.exe", "version": "2.51.0" },
+      "codex": { "path": "C:\\MulticaWorker\\npm\\codex.cmd", "version": "0.163.0" },
+      "copilot": { "path": "C:\\MulticaWorker\\npm\\copilot.cmd", "version": "1.0.101" }
+    }
+  }
+}

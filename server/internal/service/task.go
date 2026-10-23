@@ -3833,6 +3833,13 @@ func (s *TaskService) FinalizeTaskClaim(
 				return fmt.Errorf("authorize claim delivery: %w", err)
 			}
 		}
+		admitted, err := qtx.RuntimeMaintenanceAdmissionOpen(ctx, task.RuntimeID)
+		if err != nil {
+			return fmt.Errorf("maintenance delivery admission: %w", err)
+		}
+		if !admitted {
+			return errors.New("maintenance prevents new task delivery")
+		}
 		if _, err := qtx.CreateTaskToken(ctx, token); err != nil {
 			return fmt.Errorf("create task token: %w", err)
 		}

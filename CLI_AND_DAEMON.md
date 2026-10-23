@@ -21,6 +21,16 @@ cp server/bin/multica /usr/local/bin/multica
 
 ### Update
 
+For a coordinated daemon binary rollout with drain, rollback and verification
+gates, see [Controlled daemon upgrades](extensions/runtime-manager/scripts/daemon-maintenance/README.md).
+An update request is not evidence that the running daemon changed revision.
+
+For a bounded owner-profile API check, use `multica --profile <name> auth probe`
+with explicit expected host, loopback endpoint, owner UUID and workspace UUID;
+see [worker lifecycle collection](extensions/runtime-manager/scripts/daemon-maintenance/WORKER-LIFECYCLE.md).
+This checks authenticated API access, not tunnel/provider readiness or permission
+to start work, and is unavailable inside managed agent tasks.
+
 ```bash
 brew upgrade multica-ai/tap/multica
 ```
@@ -49,7 +59,44 @@ The metadata mirror must serve `/repos/multica-ai/multica/releases/latest` and
 `/<tag>/<asset-name>` and preserve the published `checksums.txt` contents.
 When these variables are unset, the GitHub defaults remain unchanged.
 
+### Owner maintenance control (source capability)
+
+`runtime maintenance` controls daemon-wide **local and upgraded-server claim admission**, not host
+deployment or complete draining. It requires backend-authenticated human ownership
+of every affected runtime/workspace registration; admin status alone is insufficient.
+It is unavailable inside managed tasks and has no local authentication bypass.
+See [daemon admission and recovery](docs/runtime-lifecycle/DAEMON-ADMISSION.md)
+for approved authority, durable replay and remaining production gates.
+
+`runtime maintenance capabilities <runtime-uuid>` performs a read-only
+exact-owner discovery using `multica-lifecycle/v1`. It describes this backend's
+configured fence; daemon coverage remains unknown and supervisor launch is
+unsupported. It is not a readiness check, launch permit or fleet-wide drain
+attestation. The optional external package is never required for ordinary work.
+
+From an authorized owner terminal, after separate live-maintenance approval:
+
+```powershell
+$id = [guid]::NewGuid().ToString()
+$issued = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+multica --profile <owner-profile> runtime maintenance status <runtime-uuid> --command-id $id --issued-at $issued --expect-daemon <daemon-id> --expect-host <os-hostname> --target-profile <daemon-profile>
+multica --profile <owner-profile> runtime maintenance get <runtime-uuid> $id
+```
+
+`acquire` and `recover` additionally require `--holder`, explicit `--generation`
+and future UTC `--expires-at` (at most 24 hours). `release` requires the same
+holder and current generation, without expiry. An empty target profile means the
+default daemon profile, not the owner CLI's selected profile. Submission is
+pending, not proof of execution; read its request for the bound result.
+Delivery expires after two minutes. Ambiguous delivery is not automatically
+retried: retain the original ID/time and inspect it before further action.
+Expiry, backend loss and restart never authorize automatic release.
+`complete_drain` is always false.
+
 ## Quick Start
+
+For controlled provisioning of additional Windows execution hosts (without another
+backend), see [Windows worker provisioning](extensions/runtime-manager/scripts/devbox/README.md).
 
 ```bash
 # One-command setup: configure, authenticate, and start the daemon
@@ -298,6 +345,21 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | `dsh` | DeepSeek Harness (`dsh --profile multica --stdio`; requires the Multica runtime profile to be installed; reads AGENTS.md and .dsh/skills/) |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
+
+### Copilot MCP configuration
+
+Copilot receives the effective managed MCP configuration through a private
+temporary file using `--additional-mcp-config @<path>`. This augments its
+runtime-local MCP servers, including on resumed sessions; the file is removed
+when the run exits or fails to start. Workspace MCP servers must still be
+assigned and enabled for the agent.
+
+If a server is enabled but its tools are absent, check configuration forwarding
+in the deployed provider adapter before assuming an authentication failure or
+repeating the assignment. Then inspect server startup/handshake diagnostics.
+Registration alone does not prove the MCP server can start or authenticate;
+verify tool discovery and a read-only operation in a subsequent run. Do not
+print the effective MCP configuration, which can contain credentials.
 
 ### How It Works
 

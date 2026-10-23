@@ -313,6 +313,7 @@ WITH victims AS (
   FROM agent_task_queue task
   JOIN agent_runtime runtime ON runtime.id = task.runtime_id
   WHERE task.status IN ('dispatched', 'running', 'waiting_local_directory')
+    AND daemon_runtime_admission_open(task.runtime_id)
     AND runtime.status = 'offline'
     AND COALESCE(runtime.last_seen_at, runtime.updated_at) <
         now() - make_interval(secs => $1::double precision)
@@ -878,6 +879,48 @@ func (q *Queries) ListDaemonCustomNames(ctx context.Context, arg ListDaemonCusto
 			return nil, err
 		}
 		items = append(items, custom_name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDaemonMaintenanceRegistrations = `-- name: ListDaemonMaintenanceRegistrations :many
+SELECT id, workspace_id, owner_id, daemon_id
+FROM agent_runtime
+WHERE daemon_id = $1
+ORDER BY workspace_id, id
+LIMIT 513
+`
+
+type ListDaemonMaintenanceRegistrationsRow struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+	DaemonID    pgtype.Text `json:"daemon_id"`
+}
+
+// Deliberately daemon-wide: narrowing by caller/workspace would hide mixed
+// ownership in another registration and authorize a machine-wide operation.
+func (q *Queries) ListDaemonMaintenanceRegistrations(ctx context.Context, daemonID pgtype.Text) ([]ListDaemonMaintenanceRegistrationsRow, error) {
+	rows, err := q.db.Query(ctx, listDaemonMaintenanceRegistrations, daemonID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDaemonMaintenanceRegistrationsRow{}
+	for rows.Next() {
+		var i ListDaemonMaintenanceRegistrationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.OwnerID,
+			&i.DaemonID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

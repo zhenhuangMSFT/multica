@@ -1,0 +1,12 @@
+{
+  "UserId": "CONTOSO\\worker-owner",
+  "Profile": "pilot-remote",
+  "TunnelId": "approved-tunnel.region",
+  "DeviceName": "WORKER-CANARY",
+  "ServerPort": 8080,
+  "MaxConcurrentTasks": 1,
+  "WorkspacesRoot": "C:\\Users\\worker-owner\\multica_workspaces_pilot-remote",
+  "MulticaExe": "C:\\Users\\worker-owner\\.multica\\bin\\multica.exe",
+  "DevTunnelExe": "C:\\ApprovedTools\\devtunnel.exe",
+  "PowerShellExe": "C:\\Program Files\\PowerShell\\7\\pwsh.exe"
+}
