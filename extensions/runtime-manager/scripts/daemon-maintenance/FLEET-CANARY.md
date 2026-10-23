@@ -1,5 +1,9 @@
 # Fleet integration contract
 
+For pinned source acceptance, the concrete execution/rollback card and remaining
+owner decisions, use [the canary execution package](CANARY-EXECUTION.md).
+It does not enable live execution or supersede the gates below.
+
 This is the combined preparation/canary/deployment contract for the existing
 bootstrap, daemon-maintenance and Windows worker logon packages. It is not an
 installer, live drain implementation or authorization. Use the
