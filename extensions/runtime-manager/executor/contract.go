@@ -77,8 +77,27 @@ func (d Definition) valid() bool {
 }
 
 func (r Request) validate(now time.Time) error {
+	if err := r.validateHistorical(); err != nil {
+		return err
+	}
+	if !r.Expires.After(now) || r.Expires.After(now.Add(time.Minute)) {
+		return ErrDenied
+	}
+	if r.Core != nil {
+		s := r.Core.Status
+		if s.ObservedAt.After(now) || now.Sub(s.ObservedAt) > time.Minute ||
+			(r.Operation != "open" && !s.ExpiresAt.After(now)) {
+			return ErrDenied
+		}
+	}
+	return nil
+}
+
+// Receipt integrity has no live authorization clock. Retained proofs must not
+// become invalid merely because their observation or hold has since expired.
+func (r Request) validateHistorical() error {
 	if r.Contract != Contract || !identifier(r.ID) || !r.Binding.valid() || !identifier(r.Incarnation) ||
-		r.Expires.Location() != time.UTC || !r.Expires.After(now) || r.Expires.After(now.Add(time.Minute)) {
+		r.Expires.IsZero() || r.Expires.Location() != time.UTC {
 		return ErrDenied
 	}
 	switch r.Operation {
@@ -108,7 +127,7 @@ func (r Request) validate(now time.Time) error {
 		if proof.Validate() != nil || proof.Code != "ok" || s.PersistenceFault || s.RecoveryRequired ||
 			proof.Delivery.OwnerID != r.Binding.OwnerID || proof.Delivery.Scope != r.Binding.Scope ||
 			c.Host != r.Binding.Host || c.Profile != r.Binding.Profile || c.DaemonID != r.Binding.DaemonID ||
-			s.Generation != r.Generation || s.ObservedAt.After(now) || now.Sub(s.ObservedAt) > time.Minute {
+			s.Generation != r.Generation || !s.ObservedAt.Before(r.Expires) {
 			return ErrDenied
 		}
 		if r.Operation == "open" {
@@ -116,11 +135,37 @@ func (r Request) validate(now time.Time) error {
 				return ErrDenied
 			}
 		} else if (c.Operation != "acquire" && c.Operation != "recover") || !s.Blocked ||
-			s.Generation != c.Generation+1 || s.Holder != c.Holder || s.Holder == "" || !s.ExpiresAt.Equal(c.ExpiresAt) || !s.ExpiresAt.After(now) {
+			s.Generation != c.Generation+1 || s.Holder != c.Holder || s.Holder == "" || !s.ExpiresAt.Equal(c.ExpiresAt) ||
+			!s.ExpiresAt.After(s.ObservedAt) {
 			return ErrDenied
 		}
 	}
 	return nil
+}
+
+func (r Request) authorizedContext(ctx context.Context, now time.Time) (context.Context, context.CancelFunc, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	if err := r.validate(now); err != nil {
+		return nil, nil, err
+	}
+	deadline := r.Expires
+	if r.Core != nil {
+		if observationDeadline := r.Core.Status.ObservedAt.Add(time.Minute); observationDeadline.Before(deadline) {
+			deadline = observationDeadline
+		}
+		if r.Operation != "open" && r.Core.Status.ExpiresAt.Before(deadline) {
+			deadline = r.Core.Status.ExpiresAt
+		}
+	}
+	if !deadline.After(now) {
+		return nil, nil, ErrDenied
+	}
+	// Translate the injected clock's remaining budget to a real context timer.
+	// Parent cancellation/deadlines can shorten it, never extend it.
+	bounded, cancel := context.WithTimeout(ctx, deadline.Sub(now))
+	return bounded, cancel, nil
 }
 
 // Authority must authenticate the manager channel AND its committed human/policy
@@ -145,6 +190,8 @@ func (c Child) valid(b Binding, d Definition) bool {
 
 // CreateSuspended must resolve only the enrolled definition. No command strings
 // or executable paths are accepted from a request. Unknown is not process exit.
+// Adapters must honor cancellation and recheck the supplied context immediately
+// before each OS side effect; a context cannot forcibly stop an ignoring adapter.
 type Processes interface {
 	CreateSuspended(context.Context, Definition, string) (Child, error)
 	Resume(context.Context, Child) error

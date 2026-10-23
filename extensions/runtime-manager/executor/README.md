@@ -37,7 +37,16 @@ credentials or processes. There is no exported "allow all" production adapter.
 | `observe` | References the exact original attempt and definition. Only an adapter-proven child identity (PID + kernel creation time + image + SID + selected session + containment) can become running/exited. Absence, access denial, changed identity or unknown remains unknown. No PID guessing, adoption, termination or implicit retry. |
 
 Authentication happens outside the local mutex; deadlines and current
-incarnation/epoch/generation are rechecked under it. The mutex spans intent,
+incarnation/epoch/generation are rechecked under it. After intent persistence and
+after child persistence, live authorization is revalidated immediately before
+create/resume: parent cancellation, request deadline, core observation freshness
+and replacement hold expiry all apply. Authority and process adapters receive
+contexts bounded by the earliest applicable deadline or the parent's remaining
+budget, with timers released after each call. Adapters must honor cancellation
+and recheck it at their OS side-effect boundary; the library cannot forcibly
+interrupt an adapter that ignores its context.
+
+The mutex spans intent,
 suspended creation, child recording, final deadline check and resume. A close
 winning the serializer prevents creation; a launch winning it is recorded as
 pre-close work before close can acknowledge. A delayed decision cannot bypass
@@ -49,6 +58,9 @@ The journal consumes an intent before any process call, records exact child
 identity before resume and commits the outcome after resume. Failed commits
 latch the executor unavailable. A surviving intent/created/running attempt
 becomes unknown on restart; only qualified observation can resolve it.
+Expiry/cancellation after consuming an intent does not refund its one-use
+replacement exception, guess a child stopped or reopen admission, even when
+create was refused before any OS call.
 Results bind request digest, incarnation, generation and epoch; remote coverage
 is always explicitly `unknown` (even when local fake children are accounted).
 Replayed receipts are explicitly `historical`, never live launch-closure or child
@@ -65,6 +77,13 @@ strict stored schemas and bounded retention (1,024 requests, 4 MiB per record,
 Duplicate keys, missing fields, changed binding, torn records and digest/sequence
 mismatch fail loading. SHA-256 detects corruption, **not malicious rewriting or
 rollback**. No protected monotonic counter or Windows ACL is installed.
+
+Receipt reload validates historical structure, exact core bindings and result
+digests, not authorization at an invented future time. A proof valid when
+accepted may have an older observation or a hold expiring before the request
+deadline; neither prevents later reload. Live execution/replay still requires
+fresh authentication and live deadlines. Historical records grant no new
+launch, release or replacement authority and are not discarded on expiry.
 
 An abandoned lock is never stolen by age/PID guessing; a crashed fixture/service
 requires verified offline lock recovery. This favors refusal over duplicate

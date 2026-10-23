@@ -86,12 +86,13 @@ func (f *fixture) reload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.e, err = New(journal, authorityFunc(func(context.Context, Request) error { return nil }), f.process,
+	next, err := New(journal, authorityFunc(func(context.Context, Request) error { return nil }), f.process,
 		f.binding, f.defs, f.instance, func() time.Time { return f.now })
 	if err != nil {
 		journal.Close()
 		t.Fatal(err)
 	}
+	f.e = next
 }
 
 func (f *fixture) request(operation string) Request {
@@ -671,5 +672,262 @@ func TestExecutorStoredSchemaAndReceiptLimit(t *testing.T) {
 	f.reload(t)
 	if out := f.execute(t, launch); !out.Historical || f.process.creates != 1 || !f.e.state.Closed {
 		t.Fatal("restart lost receipts or sealed startup", out)
+	}
+}
+
+type commitHookStore struct {
+	Store
+	commits int
+	at      int
+	hook    func()
+}
+
+func (s *commitHookStore) Commit(data []byte) error {
+	err := s.Store.Commit(data)
+	s.commits++
+	if err == nil && s.commits == s.at {
+		s.hook()
+	}
+	return err
+}
+
+func TestExecutorHistoricalReceiptReload(t *testing.T) {
+	for _, kind := range []string{"aged-observation", "short-hold"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newFixture(t)
+			r := f.request("close")
+			if kind == "aged-observation" {
+				r.Core.Delivery.Command.IssuedAt = f.now.Add(-45 * time.Second)
+				r.Core.Status.ObservedAt = r.Core.Delivery.Command.IssuedAt
+			} else {
+				r.Core.Delivery.Command.ExpiresAt = f.now.Add(10 * time.Second)
+				r.Core.Status.ExpiresAt = r.Core.Delivery.Command.ExpiresAt
+			}
+			f.execute(t, r)
+			f.reload(t)
+			if out := f.execute(t, r); !out.Historical || !f.e.state.Closed || f.e.state.Generation != r.Generation {
+				t.Fatal("reload lost bound historical receipt or closed generation", out)
+			}
+			f.now = f.now.Add(time.Hour)
+			f.reload(t)
+			if _, exists := f.e.state.Receipts[r.ID]; !exists || !f.e.state.Closed || f.e.state.Generation != r.Generation {
+				t.Fatal("expired history discarded on restart")
+			}
+			if _, err := f.e.Execute(context.Background(), r); !errors.Is(err, ErrDenied) {
+				t.Fatal("expired history became live authority", err)
+			}
+			original := f.e.state.Receipts[r.ID]
+			for _, field := range []string{"owner", "target", "generation", "holder", "digest"} {
+				changed := original
+				proof := *original.Request.Core
+				changed.Request.Core = &proof
+				switch field {
+				case "owner":
+					proof.Delivery.OwnerID = uuid.NewString()
+				case "target":
+					proof.Delivery.Command.Host, proof.Status.Host = "other", "other"
+				case "generation":
+					proof.Status.Generation++
+				case "holder":
+					proof.Status.Holder = "other"
+				case "digest":
+					changed.Outcome.RequestDigest = strings.Repeat("0", 64)
+				}
+				if field != "digest" {
+					changed.Outcome.RequestDigest = requestDigest(changed.Request)
+				}
+				f.e.state.Receipts[r.ID] = changed
+				if err := f.e.validateState(f.binding, f.defs); !errors.Is(err, ErrDenied) {
+					t.Fatal("historical validation lost structural binding:", field, err)
+				}
+				f.e.state.Receipts[r.ID] = original
+			}
+		})
+	}
+}
+
+func TestExecutorAuthorizationAcrossPersistence(t *testing.T) {
+	for _, boundary := range []string{"intent-expiry", "intent-cancel", "intent-hold-expiry", "intent-observation-expiry",
+		"create-hold-expiry", "child-persist-hold-expiry", "child-persist-cancel"} {
+		t.Run(boundary, func(t *testing.T) {
+			f := newFixture(t)
+			closeRequest := f.request("close")
+			closeRequest.Core.Delivery.Command.ExpiresAt = f.now.Add(10 * time.Second)
+			closeRequest.Core.Status.ExpiresAt = closeRequest.Core.Delivery.Command.ExpiresAt
+			f.execute(t, closeRequest)
+			r := f.request("replace")
+			if boundary == "intent-observation-expiry" {
+				r.Core.Delivery.Command.IssuedAt = f.now.Add(-55 * time.Second)
+				r.Core.Status.ObservedAt = r.Core.Delivery.Command.IssuedAt
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			delay := func() { f.now = f.now.Add(15 * time.Second) }
+			commit := 1
+			switch boundary {
+			case "intent-expiry":
+				delay = func() { f.now = f.now.Add(31 * time.Second) }
+			case "intent-cancel":
+				delay = cancel
+			case "intent-observation-expiry":
+				delay = func() { f.now = f.now.Add(6 * time.Second) }
+			case "create-hold-expiry":
+				f.process.create = delay
+				commit = 0
+			case "child-persist-hold-expiry":
+				commit = 2
+			case "child-persist-cancel":
+				commit, delay = 2, cancel
+			}
+			if commit != 0 {
+				f.e.store = &commitHookStore{Store: f.e.store, at: commit, hook: delay}
+			}
+			out, err := f.e.Execute(ctx, r)
+			wantCreates := 1
+			if strings.HasPrefix(boundary, "intent-") {
+				wantCreates = 0
+			}
+			if err == nil || f.process.creates != wantCreates || f.process.resumes != 0 {
+				t.Fatalf("authorization crossed %s: creates=%d want=%d resumes=%d outcome=%+v error=%v",
+					boundary, f.process.creates, wantCreates, f.process.resumes, out, err)
+			}
+			if out.State != "unknown" || f.e.state.Replacements[r.Transaction+":daemon"] != r.ID {
+				t.Fatal("refusal lost unknown receipt or consumed replacement", out)
+			}
+			f.reload(t)
+			if a := f.e.state.Attempts["daemon"]; a.State != "unknown" ||
+				f.e.state.Replacements[r.Transaction+":daemon"] != r.ID || !f.e.state.Closed {
+				t.Fatal("restart discarded ambiguous/consumed state", a)
+			}
+			if _, err := f.e.Execute(context.Background(), f.request("replace")); !errors.Is(err, ErrDenied) ||
+				f.process.creates != wantCreates || f.process.resumes != 0 {
+				t.Fatal("unknown attempt permitted a second replacement", err)
+			}
+		})
+	}
+}
+
+type contextProcesses struct {
+	*fakeProcesses
+	check  func(context.Context, string)
+	waitAt string
+}
+
+func (p *contextProcesses) CreateSuspended(ctx context.Context, d Definition, id string) (Child, error) {
+	p.check(ctx, "create")
+	if p.waitAt == "create" {
+		<-ctx.Done()
+		return Child{}, ctx.Err()
+	}
+	return p.fakeProcesses.CreateSuspended(ctx, d, id)
+}
+
+func (p *contextProcesses) Resume(ctx context.Context, child Child) error {
+	p.check(ctx, "resume")
+	if p.waitAt == "resume" {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return p.fakeProcesses.Resume(ctx, child)
+}
+
+func (p *contextProcesses) Observe(ctx context.Context, id string, child Child) (string, Child, error) {
+	p.check(ctx, "observe")
+	if p.waitAt == "observe" {
+		<-ctx.Done()
+		return "unknown", child, ctx.Err()
+	}
+	return p.fakeProcesses.Observe(ctx, id, child)
+}
+
+func TestExecutorAdapterAuthorizationBudget(t *testing.T) {
+	for _, limit := range []string{"request", "hold", "observation", "parent"} {
+		t.Run(limit, func(t *testing.T) {
+			f := newFixture(t)
+			closeRequest := f.request("close")
+			if limit == "hold" {
+				closeRequest.Core.Delivery.Command.ExpiresAt = f.now.Add(9 * time.Second)
+				closeRequest.Core.Status.ExpiresAt = closeRequest.Core.Delivery.Command.ExpiresAt
+			}
+			f.execute(t, closeRequest)
+			r := f.request("replace")
+			switch limit {
+			case "request":
+				r.Expires = f.now.Add(9 * time.Second)
+			case "observation":
+				r.Core.Delivery.Command.IssuedAt = f.now.Add(-51 * time.Second)
+				r.Core.Status.ObservedAt = r.Core.Delivery.Command.IssuedAt
+			}
+			parent := context.Background()
+			var parentCancel context.CancelFunc
+			if limit == "parent" {
+				parent, parentCancel = context.WithTimeout(parent, 4*time.Second)
+				defer parentCancel()
+			}
+			var contexts []context.Context
+			check := func(ctx context.Context, stage string) {
+				t.Helper()
+				contexts = append(contexts, ctx)
+				deadline, exists := ctx.Deadline()
+				budget := 9 * time.Second
+				if stage == "create" {
+					budget -= 3 * time.Second
+				} else if stage == "resume" {
+					budget -= 5 * time.Second
+				}
+				if limit == "parent" {
+					budget = 4 * time.Second
+				}
+				if !exists || time.Until(deadline) <= 0 || time.Until(deadline) > budget {
+					t.Errorf("%s did not receive remaining %s authorization budget: %v", stage, budget, deadline)
+				}
+			}
+			f.e.authority = authorityFunc(func(ctx context.Context, _ Request) error { check(ctx, "authority"); return nil })
+			f.e.processes = &contextProcesses{fakeProcesses: f.process, check: check}
+			f.e.store = &commitHookStore{Store: &commitHookStore{Store: f.e.store, at: 1,
+				hook: func() { f.now = f.now.Add(3 * time.Second) }}, at: 2,
+				hook: func() { f.now = f.now.Add(2 * time.Second) }}
+			if out, err := f.e.Execute(parent, r); err != nil || out.State != "running" ||
+				f.process.creates != 1 || f.process.resumes != 1 || len(contexts) != 3 {
+				t.Fatal("remaining authorization budget was not usable", out, err)
+			}
+			for _, ctx := range contexts {
+				if !errors.Is(ctx.Err(), context.Canceled) {
+					t.Fatal("completed adapter context timer not released", ctx.Err())
+				}
+			}
+		})
+	}
+	for _, waitAt := range []string{"authority", "create", "resume", "observe"} {
+		t.Run("timeout-"+waitAt, func(t *testing.T) {
+			f := newFixture(t)
+			f.execute(t, f.request("open"))
+			r := f.request("launch")
+			if waitAt == "observe" {
+				f.execute(t, r)
+				r = f.request("observe")
+			}
+			r.Expires = f.now.Add(25 * time.Millisecond)
+			check := func(ctx context.Context, _ string) {
+				if _, exists := ctx.Deadline(); !exists {
+					t.Fatal("unbounded process adapter")
+				}
+			}
+			f.e.processes = &contextProcesses{fakeProcesses: f.process, check: check, waitAt: waitAt}
+			if waitAt == "authority" {
+				f.e.authority = authorityFunc(func(ctx context.Context, _ Request) error { <-ctx.Done(); return ctx.Err() })
+			}
+			out, err := f.e.Execute(context.Background(), r)
+			wantResumes := 0
+			if waitAt == "observe" {
+				wantResumes = 1
+			}
+			if !errors.Is(err, context.DeadlineExceeded) || f.process.resumes != wantResumes {
+				t.Fatal("bounded adapter timeout did not refuse execution", out, err)
+			}
+			if waitAt != "authority" && out.State != "unknown" {
+				t.Fatal("timed-out side effect lost ambiguous state", out)
+			}
+		})
 	}
 }

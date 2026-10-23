@@ -27,6 +27,11 @@ only a future qualified Windows adapter can verify the underlying token.
 The adapter must use suspended creation, controlled handle inheritance, a clean
 allowlisted environment and a reviewed job/containment mechanism; it resolves
 immutable, protected component definitions by digest, never shell input. No
+adapter may extend the request, observation-freshness, hold or parent-context
+budget. Check cancellation immediately before the OS call and return an
+explicit unknown/error on timeout; cancellation is not proof of process exit.
+The library rechecks live authorization after journal writes before create and
+resume and retains consumed exceptions/unknown attempts on refusal. No
 owner/service credentials enter argv, wrappers, tasks, plugin storage or child
 environment. Before resuming a replacement daemon it must qualify the existing
 daemon/profile identity and persisted local held generation. That check is not

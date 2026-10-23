@@ -149,7 +149,7 @@ func (e *Executor) validateState(binding Binding, definitions [2]Definition) err
 	}
 	for id, receipt := range s.Receipts {
 		if !identifier(id) || receipt.Request.ID != id || receipt.Request.Binding != binding ||
-			receipt.Request.validate(receipt.Request.Expires.Add(-time.Nanosecond)) != nil || receipt.Outcome.Validate(receipt.Request) != nil {
+			receipt.Request.validateHistorical() != nil || receipt.Outcome.Validate(receipt.Request) != nil {
 			return ErrDenied
 		}
 	}
@@ -219,10 +219,14 @@ func (e *Executor) Execute(ctx context.Context, r Request) (Outcome, error) {
 		proof := *r.Core
 		r.Core = &proof
 	}
-	if err := r.validate(e.now()); err != nil {
+	verifyCtx, cancelVerify, err := r.authorizedContext(ctx, e.now())
+	if err != nil {
 		return Outcome{}, err
 	}
-	if err := e.authority.Verify(ctx, r); err != nil {
+	err = e.authority.Verify(verifyCtx, r)
+	verifyErr := verifyCtx.Err()
+	cancelVerify()
+	if err := errors.Join(err, verifyErr); err != nil {
 		return Outcome{}, err
 	}
 	e.mu.Lock()
@@ -277,7 +281,13 @@ func (e *Executor) Execute(ctx context.Context, r Request) (Outcome, error) {
 		if !exists || a.ID != r.Attempt || a.Definition != r.Definition || a.State == "exited" {
 			return Outcome{}, ErrDenied
 		}
-		status, child, err := e.processes.Observe(ctx, a.ID, a.Child)
+		observeCtx, cancelObserve, err := r.authorizedContext(ctx, e.now())
+		if err != nil {
+			return Outcome{}, err
+		}
+		status, child, err := e.processes.Observe(observeCtx, a.ID, a.Child)
+		err = errors.Join(err, observeCtx.Err())
+		cancelObserve()
 		if err != nil || (status != "running" && status != "exited") || !child.valid(e.state.Binding, a.Definition) ||
 			(a.Child != (Child{}) && a.Child != child) {
 			a.State = "unknown"
@@ -329,23 +339,38 @@ func (e *Executor) launch(ctx context.Context, r Request) (Outcome, error) {
 	if _, err := e.finish(r, "unknown", Child{}); err != nil {
 		return Outcome{}, err
 	}
-	child, err := e.processes.CreateSuspended(ctx, r.Definition, r.ID)
-	if err != nil || !child.valid(e.state.Binding, r.Definition) {
+	createCtx, cancelCreate, err := r.authorizedContext(ctx, e.now())
+	if err != nil {
 		a.State = "unknown"
 		e.state.Attempts[r.Definition.Component] = a
 		out, saveErr := e.finish(r, "unknown", Child{})
 		return out, errors.Join(ErrUnknown, err, saveErr)
+	}
+	child, err := e.processes.CreateSuspended(createCtx, r.Definition, r.ID)
+	createContextErr := createCtx.Err()
+	cancelCreate()
+	if err != nil || !child.valid(e.state.Binding, r.Definition) {
+		a.State = "unknown"
+		e.state.Attempts[r.Definition.Component] = a
+		out, saveErr := e.finish(r, "unknown", Child{})
+		return out, errors.Join(ErrUnknown, err, createContextErr, saveErr)
 	}
 	a.Child, a.State = child, "created"
 	e.state.Attempts[r.Definition.Component] = a
 	if err := e.persist(); err != nil {
 		return Outcome{}, err // Never resume after an ambiguous child receipt write.
 	}
-	if ctx.Err() != nil || !r.Expires.After(e.now()) {
+	resumeCtx, cancelResume, authorizationErr := r.authorizedContext(ctx, e.now())
+	if authorizationErr != nil || createContextErr != nil {
+		if cancelResume != nil {
+			cancelResume()
+		}
 		a.State = "unknown"
-		err = ErrDenied
+		err = errors.Join(authorizationErr, createContextErr)
 	} else {
-		err = e.processes.Resume(ctx, child)
+		err = e.processes.Resume(resumeCtx, child)
+		err = errors.Join(err, resumeCtx.Err())
+		cancelResume()
 		a.State = "running"
 		if err != nil {
 			a.State = "unknown"
