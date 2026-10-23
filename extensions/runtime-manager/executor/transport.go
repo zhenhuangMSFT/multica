@@ -65,6 +65,57 @@ type Transport struct {
 	closeOnce sync.Once
 }
 
+// SessionAuthority keeps one executor across connection replacement. Bind waits
+// for an active Verify to finish; neither method retries, closes or executes.
+// The zero value is unavailable until an executor-role transport is bound.
+type SessionAuthority struct {
+	once    sync.Once
+	gate    chan struct{}
+	session *Transport
+}
+
+func (s *SessionAuthority) acquire(ctx context.Context) error {
+	s.once.Do(func() { s.gate = make(chan struct{}, 1) })
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case s.gate <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *SessionAuthority) Bind(ctx context.Context, session *Transport) error {
+	if session == nil {
+		return ErrUnavailable
+	}
+	if session.role != "executor" {
+		return ErrDenied
+	}
+	if err := s.acquire(ctx); err != nil {
+		return err
+	}
+	defer func() { <-s.gate }()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.session = session
+	return nil
+}
+
+func (s *SessionAuthority) Verify(ctx context.Context, r Request) error {
+	if err := s.acquire(ctx); err != nil {
+		return err
+	}
+	defer func() { <-s.gate }()
+	if s.session == nil {
+		return ErrUnavailable
+	}
+	return s.session.Verify(ctx, r)
+}
+
 // OpenTransport takes ownership of raw, including on failure. It never dials,
 // listens, provisions credentials or starts an executor. Role executor uses the
 // outbound TLS client; role manager uses the mutually authenticated TLS server.
@@ -284,7 +335,7 @@ func (t *Transport) SendRequest(ctx context.Context, r Request, message SignedAu
 		if err := t.sendPeer(ctx, r); err != nil {
 			return err
 		}
-		return t.writeFrame(RequestFrame{TransportContract, r, message})
+		return t.writeFrame(RequestFrame{TransportContract, r, frameAuthority(message)})
 	})
 	return transportUnknown(r.ID, err)
 }
@@ -301,15 +352,28 @@ func (t *Transport) ReceiveRequest(ctx context.Context) (Request, error) {
 		if frame.Contract != TransportContract {
 			return ErrDenied
 		}
-		if err := t.authority.Verify(ctx, frame.Request); err != nil {
-			return err
-		}
-		records, err := t.authority.verifyAuthorization(ctx, frame.Request)
+		authorized, cancel, err := frame.Request.authorizedContext(ctx, t.authority.Now())
 		if err != nil {
 			return err
 		}
-		return verifyAuthorityMessage(records.enrollment, frame.Authority, frame.Request,
-			decisionKind(frame.Request), "", t.authority.Now(), false)
+		defer cancel()
+		return t.withDeadline(authorized, func() error {
+			if err := t.authority.Verify(authorized, frame.Request); err != nil {
+				return err
+			}
+			records, err := t.authority.verifyAuthorization(authorized, frame.Request)
+			if err != nil {
+				return err
+			}
+			if err := verifyAuthorityMessage(records.enrollment, frame.Authority, frame.Request,
+				decisionKind(frame.Request), "", t.authority.Now(), false); err != nil {
+				return err
+			}
+			if err := authorized.Err(); err != nil {
+				return err
+			}
+			return frame.Request.validate(t.authority.Now())
+		})
 	})
 	if err != nil {
 		return Request{}, err
@@ -337,9 +401,18 @@ func (t *Transport) SendResult(ctx context.Context, r Request, out Outcome, mess
 		if err := t.sendPeer(ctx, r); err != nil {
 			return err
 		}
-		return t.writeFrame(ResultFrame{TransportContract, out, message})
+		return t.writeFrame(ResultFrame{TransportContract, out, frameAuthority(message)})
 	})
 	return transportUnknown(r.ID, err)
+}
+
+// A root-issued leaf has no intermediates. Preserve signed fields while using
+// the strict decoder's required array encoding, never JSON null.
+func frameAuthority(message SignedAuthority) SignedAuthority {
+	if message.Intermediates == nil {
+		message.Intermediates = [][]byte{}
+	}
+	return message
 }
 
 func (t *Transport) ReceiveResult(ctx context.Context, r Request) (Outcome, error) {

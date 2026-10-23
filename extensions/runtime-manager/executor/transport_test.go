@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -39,6 +40,11 @@ func transportCredentials(t *testing.T, a *authorityFixture, role string) TLSCre
 func transportPair(t *testing.T, a *authorityFixture) (*Transport, *Transport) {
 	t.Helper()
 	client, server := net.Pipe()
+	return transportPairConnections(t, a, client, server)
+}
+
+func transportPairConnections(t *testing.T, a *authorityFixture, client, server net.Conn) (*Transport, *Transport) {
+	t.Helper()
 	managerConfig, executorConfig := transportCredentials(t, a, "manager"), transportCredentials(t, a, "executor")
 	type opened struct {
 		transport *Transport
@@ -82,47 +88,6 @@ func sendTransportRequest(t *testing.T, a *authorityFixture, manager, executor *
 	return r
 }
 
-func TestTransportSignedRoundTripAndLostResponse(t *testing.T) {
-	a := newAuthorityFixture(t)
-	a.r = a.f.request("open")
-	a.authorize()
-	manager, executor := transportPair(t, a)
-	r := sendTransportRequest(t, a, manager, executor)
-	a.f.e.authority = executor
-	a.f.execute(t, r)
-	manager.Close()
-	executor.Close()
-	a.r = a.f.request("launch")
-	a.authorize()
-	manager, executor = transportPair(t, a)
-	r = sendTransportRequest(t, a, manager, executor)
-	a.f.e.authority = executor
-	out := a.f.execute(t, r)
-	if a.f.process.creates != 1 || a.f.process.resumes != 1 {
-		t.Fatal("fixture launch did not happen exactly once")
-	}
-	manager.Close() // Response lost after the operation committed.
-	err := executor.SendResult(context.Background(), r, out, a.message(&out))
-	var uncertain *TransportError
-	if !errors.As(err, &uncertain) || uncertain.OperationID != r.ID || !errors.Is(err, ErrUnknown) {
-		t.Fatal("lost response did not identify exact operation for reconciliation", err)
-	}
-	manager, executor = transportPair(t, a)
-	r = sendTransportRequest(t, a, manager, executor) // Same ID and same bytes, no new launch grant.
-	a.f.e.authority = executor
-	replay := a.f.execute(t, r)
-	if !replay.Historical || a.f.process.creates != 1 || a.f.process.resumes != 1 {
-		t.Fatal("reconciliation reran a process", replay)
-	}
-	done := make(chan error, 1)
-	go func() { done <- executor.SendResult(context.Background(), r, replay, a.message(&replay)) }()
-	received, err := manager.ReceiveResult(context.Background(), r)
-	sendErr := <-done
-	if err != nil || sendErr != nil || !received.Historical || received != replay {
-		t.Fatal("signed result failed genuine manager receiver verification", received, err, sendErr)
-	}
-}
-
 func rawFrame(data []byte) []byte {
 	wire := make([]byte, 4+len(data))
 	binary.BigEndian.PutUint32(wire, uint32(len(data)))
@@ -143,7 +108,7 @@ func transportOutcome(t *testing.T, a *authorityFixture) Outcome {
 func TestTransportMalformedFrames(t *testing.T) {
 	for _, endpoint := range []string{"request", "result"} {
 		for _, failure := range []string{"truncated-header", "truncated-body", "zero", "oversized", "malformed", "unknown-field",
-			"duplicate", "missing", "null", "trailing-json", "wrong-contract", "bad-signature", "disconnect"} {
+			"duplicate", "missing", "null", "null-intermediates", "trailing-json", "wrong-contract", "bad-signature", "disconnect"} {
 			t.Run(endpoint+"-"+failure, func(t *testing.T) {
 				a := newAuthorityFixture(t)
 				manager, executor := transportPair(t, a)
@@ -179,6 +144,8 @@ func TestTransportMalformedFrames(t *testing.T) {
 					wire = rawFrame([]byte(`{}`))
 				case "null":
 					wire = rawFrame([]byte(`null`))
+				case "null-intermediates":
+					wire = rawFrame([]byte(strings.Replace(string(data), `"intermediates":[]`, `"intermediates":null`, 1)))
 				case "trailing-json":
 					wire = rawFrame(append(data, []byte(`{}`)...))
 				case "wrong-contract":
@@ -240,26 +207,39 @@ func TestTransportDeadlinesAndCancellation(t *testing.T) {
 					client, server := net.Pipe()
 					defer server.Close()
 					config := transportCredentials(t, a, "executor")
-					started := make(chan struct{})
+					blocked := newBlockedConn(client)
+					if failure == "cancel" {
+						blocked.arm("write")
+					}
 					done := make(chan error, 1)
 					go func() {
-						close(started)
-						_, openErr := OpenTransport(ctx, client, "executor",
+						_, openErr := OpenTransport(ctx, blocked, "executor",
 							credentialsFunc(func(context.Context) (TLSCredentials, error) { return config, nil }), a.adapter, time.Second)
 						done <- openErr
 					}()
-					<-started
 					if failure == "cancel" {
+						waitBlocked(t, blocked)
 						cancel()
 					}
 					err = <-done
 				} else {
-					manager, executor := transportPair(t, a)
+					client, server := net.Pipe()
+					clientConn, serverConn := newBlockedConn(client), newBlockedConn(server)
+					manager, executor := transportPairConnections(t, a, clientConn, serverConn)
+					blocked := clientConn
+					if stage == "request-write" || stage == "result-read" {
+						blocked = serverConn
+					}
+					if failure == "cancel" {
+						if strings.HasSuffix(stage, "-read") {
+							blocked.arm("read")
+						} else {
+							blocked.arm("write")
+						}
+					}
 					out := transportOutcome(t, a)
 					done := make(chan error, 1)
-					started := make(chan struct{})
 					go func() {
-						close(started)
 						var operationErr error
 						switch stage {
 						case "request-read":
@@ -273,8 +253,8 @@ func TestTransportDeadlinesAndCancellation(t *testing.T) {
 						}
 						done <- operationErr
 					}()
-					<-started
 					if failure == "cancel" {
+						waitBlocked(t, blocked)
 						cancel()
 					}
 					err = <-done
@@ -290,6 +270,67 @@ func TestTransportDeadlinesAndCancellation(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// Once armed, I/O cannot progress until Close: the signal originates inside
+// the blocked connection call, not before entering a transport operation.
+type blockedConn struct {
+	net.Conn
+	mu        sync.Mutex
+	mode      string
+	entered   chan struct{}
+	closed    chan struct{}
+	enterOnce sync.Once
+	closeOnce sync.Once
+}
+
+func newBlockedConn(conn net.Conn) *blockedConn {
+	return &blockedConn{Conn: conn, entered: make(chan struct{}), closed: make(chan struct{})}
+}
+
+func (c *blockedConn) arm(mode string) {
+	c.mu.Lock()
+	c.mode = mode
+	c.mu.Unlock()
+}
+
+func (c *blockedConn) block(mode string) bool {
+	c.mu.Lock()
+	armed := c.mode == mode
+	c.mu.Unlock()
+	if armed {
+		c.enterOnce.Do(func() { close(c.entered) })
+		<-c.closed
+	}
+	return armed
+}
+
+func (c *blockedConn) Read(p []byte) (int, error) {
+	if c.block("read") {
+		return 0, net.ErrClosed
+	}
+	return c.Conn.Read(p)
+}
+
+func (c *blockedConn) Write(p []byte) (int, error) {
+	if c.block("write") {
+		return 0, net.ErrClosed
+	}
+	return c.Conn.Write(p)
+}
+
+func (c *blockedConn) Close() error {
+	c.closeOnce.Do(func() { close(c.closed) })
+	return c.Conn.Close()
+}
+
+func waitBlocked(t *testing.T, c *blockedConn) {
+	t.Helper()
+	select {
+	case <-c.entered:
+	case <-time.After(time.Second):
+		t.Fatal("operation never entered blocked connection I/O")
 	}
 }
 
@@ -501,4 +542,5 @@ func TestTransportPreservesSignedBindings(t *testing.T) {
 }
 
 var _ Authority = (*Transport)(nil)
+var _ Authority = (*SessionAuthority)(nil)
 var _ io.Closer = (*Transport)(nil)

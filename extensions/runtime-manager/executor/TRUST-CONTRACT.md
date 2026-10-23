@@ -98,6 +98,14 @@ dial, provision a certificate or activate an executor. Bounded strict frames
 carry existing signed requests/results. Failed sends/lost responses remain
 unknown and reconcile by the original operation ID against durable receipts;
 no connection error authorizes a second process call.
+The exported `SessionAuthority` binds successive executor-role connections to
+one existing executor with synchronized, cancellable binding/verification.
+Reconnection retains the journal, incarnation and exact request ID/bytes; it
+does not reuse cached peer evidence or reconstruct the executor. Binding is
+not a new enrollment, key rotation, grant or process cancellation mechanism.
+Outgoing absent intermediates use empty arrays without altering signed fields;
+strict incoming null rejection remains. Request authorization budgets cover
+final frame verification and live validity is rechecked before acceptance.
 
 ## Local IPC, journal and receipts
 

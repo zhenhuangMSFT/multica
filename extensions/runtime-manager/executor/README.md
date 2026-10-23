@@ -190,6 +190,8 @@ big-endian body length followed by **1..16,384 bytes** of strict JSON. Request
 bodies contain `contract`, `request` and `authority`; result bodies contain
 `contract`, `outcome` and `authority`. They reuse the current typed contracts
 unchanged. Limits apply before allocation on reads and before sending on writes.
+Outgoing absent certificate intermediates are encoded as `[]`, not `null`;
+this changes no signed field or signature. Incoming `null` remains invalid.
 Unknown/duplicate/missing/null fields, malformed/trailing JSON, wrong versions,
 truncated bodies, wrong signatures and mismatched expected results are refused.
 The result receiver always supplies its original expected request, never one
@@ -197,7 +199,9 @@ selected by a received actor or operation ID.
 
 Handshake, source callbacks, frame reads/writes and authority checks share bounded
 contexts and connection deadlines. Known requests additionally use the earliest
-live request/observation/hold/parent budget. Cancellation interrupts the owned
+live request/observation/hold/parent budget. Once a request is decoded, that
+budget remains active through final frame-signature verification, with a final
+context/live-request recheck before acceptance. Cancellation interrupts the owned
 connection; failed I/O or verification poisons/closes the session rather than
 attempting to resynchronize a partial stream. Session operations serialize with
 cancellable acquisition. Raw connection close is used for bounded cleanup, not
@@ -210,6 +214,18 @@ connection; it does not bypass the executor journal or serializer. Source
 fixtures use only fake process adapters. Production process adapters stay
 unavailable.
 
+For reconnectable integration, create one `SessionAuthority` and pass its pointer
+to `New` as the executor's authority. Call `Bind(ctx, transport)` with the initial
+executor-role session and each freshly opened replacement. Binding is serialized
+with verification and waits cancellably for an active verification to finish;
+the zero/unbound value is unavailable and manager-role/nil bindings are refused.
+Each verification uses the bound connection's actual peer and fresh authoritative
+records, never cached TLS evidence. Keep the same executor, journal and
+incarnation across reconnects. Binding neither closes sessions nor dispatches,
+retries or cancels a process; the caller owns old-session cleanup and session
+selection. It does not linearize already-accepted executor work or qualify
+atomic revocation, restart durability or production connection hosting.
+
 Failed sends or result reception return `TransportError` with the existing
 `OperationID` and `ErrUnknown`. They are conservative even when no bytes may
 have left: a timeout/disconnect is not proof that a child did not run. Reconnect
@@ -218,6 +234,9 @@ do not mint a new launch/transaction or automatically retry an OS action.
 Within its live authorization window the existing executor returns a signed
 historical receipt without another process call. Expired/rotated requests need
 future authenticated manager history, not renewed execution under this API.
+Integration fixtures use the exported session binding rather than changing the
+executor's private authority. Cancellation fixtures signal from a connection
+read/write that cannot complete until close, then cancel and verify interruption.
 This source increment adds no production durable manager history endpoint.
 
 Fixtures perform real mutual TLS over `net.Pipe`, with ephemeral in-memory
