@@ -21,8 +21,11 @@ See [core admission/recovery](DAEMON-ADMISSION.md) for implemented semantics and
 [the external architecture](EXTERNAL-RUNTIME-MANAGEMENT.md) for remaining
 executor identity/privilege/transport, multi-party coordination and first-write
 durability requirements. Source layout and public v1 types are implemented;
-the privileged external executor is not. Optional offline plugin source now
-lives in `extensions/runtime-manager/plugin`, using the existing manifest-v1
+the privileged external service is not. The optional
+`extensions/runtime-manager/executor` now contains a persistent launch/maintenance
+state-machine library with fake transport/process tests and explicitly
+unavailable production adapters, not a deployed executor. Optional offline plugin
+source now lives in `extensions/runtime-manager/plugin`, using the existing manifest-v1
 sidebar surface for plans/local proposal drafts only; it is not published,
 installed or connected to a service. Production worker
 transactions remain disabled; installed paths/startup are unchanged.

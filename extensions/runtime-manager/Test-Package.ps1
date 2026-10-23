@@ -7,7 +7,8 @@ Set-StrictMode -Version Latest
 $metadata = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'extension.json') -Raw | ConvertFrom-Json
 if ($metadata.schema_version -ne 1 -or $metadata.name -ne 'runtime-manager' -or
     $metadata.version -ne '0.1.0-dev' -or $metadata.core_contract -ne 'multica-lifecycle/v1' -or
-    $metadata.installation -ne 'manual-opt-in' -or $metadata.executor -ne 'unimplemented' -or
+    $metadata.installation -ne 'manual-opt-in' -or $metadata.executor -ne 'source-state-machine' -or
+    $metadata.production_adapters -ne 'unavailable' -or
     $metadata.complete_drain -ne $false -or $metadata.production_transactions -ne $false) {
     throw 'Unsupported or unsafe runtime-manager package metadata.'
 }

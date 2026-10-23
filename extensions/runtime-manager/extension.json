@@ -4,7 +4,8 @@
   "version": "0.1.0-dev",
   "core_contract": "multica-lifecycle/v1",
   "installation": "manual-opt-in",
-  "executor": "unimplemented",
+  "executor": "source-state-machine",
+  "production_adapters": "unavailable",
   "complete_drain": false,
   "production_transactions": false
 }

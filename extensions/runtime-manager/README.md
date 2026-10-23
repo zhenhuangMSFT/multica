@@ -23,6 +23,7 @@ owner credential forwarding.
 | `extensions/runtime-manager/scripts/windows-worker` | Guarded optional logon installer and existing direct-launch wrapper; not an atomic maintenance-aware supervisor. |
 | `extensions/runtime-manager/scripts/daemon-maintenance` | Pure lifecycle policy, read-only snapshots, simulation-only transactions, evidence validation and external executor design. |
 | `plugin` | Optional manifest-v1 offline sidebar UI: sanitized unavailable status, static plans and local proposal drafts. No service endpoint, grant, lifecycle action or installation implied. |
+| `executor` | Persistent serialized launch/maintenance library, exact one-use replacement, replay and unknown-child recovery with isolated adapters. Production transport/Windows execution remain unavailable. |
 
 Generic reservation/claim fencing and authenticated owner control remain with
 Multica's backend/daemon. The public core contract is
@@ -40,10 +41,13 @@ non-empty-scope requirement uses `storage:user`, but the preview performs no
 storage calls or other host actions.
 
 The approved external-service boundary does not approve a host executor's
-identity, privilege, credential enrollment or transport. That executor remains
-**unimplemented**. A plugin UI, skill or MCP endpoint cannot host or authorize
-it. Complete drain is false; production transactions are disabled. Existing
-live startup paths are not relocated or upgraded by moving this source.
+identity, privilege, credential enrollment or transport. The executor
+[state-machine source and trust contract](executor/README.md) are implemented
+for isolated adapter tests; the independently running privileged Windows
+executor and external manager remain **unavailable**. A plugin UI, skill or MCP
+endpoint cannot host or authorize them. Complete drain is false; production
+transactions are disabled. Existing live startup paths are not relocated or
+upgraded by moving this source.
 
 ## Isolated verification
 

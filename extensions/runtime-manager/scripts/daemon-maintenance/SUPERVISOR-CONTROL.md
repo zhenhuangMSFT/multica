@@ -6,7 +6,13 @@ deployment and journals proposed here belong to that separately versioned
 extension, not core Multica. This document's authority/privilege choices remain
 unapproved; a plugin package does not install or host the broker.
 
-**Decision required; not implemented or enabled.** The existing maintenance
+**Source state machine implemented; production adapters not enabled.**
+The bounded [executor library and tests](../../executor/README.md) implement
+persistent local serialization, replay, unknown attempts and one-use replacement.
+The [concrete trust contract](../../executor/TRUST-CONTRACT.md) specifies proposed
+identity/session, key/IPC/journal and enrollment boundaries. No service,
+transport, key, privilege or live startup change is implemented/activated.
+The existing maintenance
 authority covers human requests, backend reservations and local daemon claims.
 It does not authorize an external process to start children, and it cannot
 serialize an OS process creation with maintenance acquisition. This proposal
@@ -87,8 +93,8 @@ arbitrary executable/path/argv input is allowed.
 | `LaunchObservation` | Bound request/reservation/incarnation, journal sequence, component and outcome (`denied`, `intent`, `created`, `observed_exited`, `outcome_unknown`). Child identity includes PID, kernel creation time, actual image identity/hash, owner SID/session, profile and containment identity. Missing identity/coverage is explicit unknown. |
 | `ReplacementLaunch` | Separately authorized human command bound to current held holder/generation, broker incarnation/epoch, transaction, exact replacement digests and one component/attempt. It is consumable only while held; it never reopens ordinary launch admission. |
 
-The backend must persist launch reservations and command intent in its
-transactional repository under the same daemon serialization as maintenance,
+The **external manager** must persist launch decisions and command intent in its
+own transactional repository, coordinated with core maintenance closure,
 not only in Redis. One unresolved attempt per installation/component prevents
 duplicate requests from producing a second child. Changed payload under an
 existing ID conflicts. Multiple affected registrations remain daemon-wide;
@@ -102,8 +108,9 @@ kernel-enforced single creator/serializer shared by **every** component launch
 and maintenance transition. A mutex by itself is not durable authority. Neither
 backend acceptance nor a reservation snapshot is permission to call the OS later.
 
-1. Backend acquisition first persists its existing closed reservation gate and a
-   new launch-close intent/epoch. It stops issuing ordinary launch reservations.
+1. Core acquisition first persists its existing closed reservation gate; the
+   external manager owns a separate launch-close intent/epoch and stops issuing
+   ordinary launch decisions. This multi-party integration is not wired yet.
    The command remains pending supervisor coverage until the broker acknowledges
    the close; today's daemon result alone must not upgrade that claim.
 2. Every broker launch serializes generation/epoch checks, durable launch intent,
@@ -179,10 +186,11 @@ Connector replacement, if needed, requires its own equally bound operation.
 
 ## Proposed isolated acceptance matrix
 
-No new launch adapter or race tests are implemented by this decision document.
-After approval, use an injected clock, transactional repository, durable
-journal, broker serializer and fake process factory; never owner credentials,
-real provider CLIs, live tasks or actual host restarts.
+The optional executor source now has deterministic local race/failure fixtures
+using an injected clock, append journal, serializer and fake authority/process
+factory. They qualify the library only, not the proposed manager transaction,
+Windows process adapter, privileged transport or real host. Never use owner
+credentials, real provider CLIs, live tasks or actual host restarts for these tests.
 
 | Scenario | Required assertion |
 | --- | --- |
