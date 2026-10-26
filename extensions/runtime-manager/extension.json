@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "name": "runtime-manager",
+  "version": "0.1.0-dev",
+  "core_contract": "multica-lifecycle/v1",
+  "installation": "manual-opt-in",
+  "executor": "source-state-machine",
+  "production_adapters": "unavailable",
+  "complete_drain": false,
+  "production_transactions": false
+}

@@ -646,6 +646,11 @@ type DaemonConnection struct {
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
+type DaemonMaintenanceAdmission struct {
+	DaemonID string `json:"daemon_id"`
+	State    []byte `json:"state"`
+}
+
 type DaemonToken struct {
 	ID          pgtype.UUID        `json:"id"`
 	TokenHash   string             `json:"token_hash"`

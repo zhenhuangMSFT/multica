@@ -1,0 +1,20 @@
+{
+  "manifest_version": 1,
+  "key": "ai.multica.runtime-manager-preview",
+  "name": "Runtime Manager Preview",
+  "description": "Offline status, plans and local change-request drafts. No service connection or execution authority.",
+  "version": "0.1.0-dev",
+  "author": { "name": "Multica Runtime Manager" },
+  "scopes": ["storage:user"],
+  "contributes": {
+    "surfaces": [
+      {
+        "key": "runtime-manager",
+        "type": "sidebar_panel",
+        "name": "Runtime Manager Preview",
+        "entry": "ui/main.js",
+        "platforms": ["web", "desktop"]
+      }
+    ]
+  }
+}

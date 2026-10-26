@@ -738,6 +738,7 @@ WHERE id = (
     WHERE atq.agent_id = @agent_id
       AND atq.runtime_id = @runtime_id
       AND atq.status = 'queued'
+      AND daemon_runtime_admission_open(atq.runtime_id)
       AND (atq.context->>'wakeup_id' IS NULL OR EXISTS (SELECT 1 FROM issue_wakeup w WHERE w.id=(atq.context->>'wakeup_id')::uuid AND w.disabled_at IS NULL AND w.revision=(atq.context->>'wakeup_revision')::bigint))
       AND EXISTS (
           SELECT 1
@@ -853,6 +854,7 @@ WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.runtime_id = $1
       AND atq.status = 'dispatched'
+      AND daemon_runtime_admission_open(atq.runtime_id)
       AND atq.started_at IS NULL
       AND atq.dispatched_at < now() - make_interval(secs => @claim_recovery_secs::double precision)
       AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
@@ -900,6 +902,7 @@ WHERE id IN (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
       AND atq.status = 'dispatched'
+      AND daemon_runtime_admission_open(atq.runtime_id)
       AND atq.started_at IS NULL
       AND atq.dispatched_at < now() - make_interval(secs => @claim_recovery_secs::double precision)
       AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
@@ -1250,7 +1253,9 @@ UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'task timed out',
     failure_reason = 'timeout',
     prepare_lease_expires_at = NULL
-WHERE (
+WHERE (NOT EXISTS (SELECT 1 FROM agent_runtime r WHERE r.id = agent_task_queue.runtime_id)
+       OR daemon_runtime_admission_open(runtime_id))
+AND ((
     status = 'dispatched'
     AND dispatched_at < now() - make_interval(secs => @dispatch_timeout_secs::double precision)
     AND (prepare_lease_expires_at IS NULL OR prepare_lease_expires_at < now())
@@ -1287,7 +1292,7 @@ WHERE (
               now() - make_interval(secs => @runtime_reconnect_grace_secs::double precision)
       )
     )
-  )
+  ))
 RETURNING *;
 
 -- name: ExpireStaleQueuedTasks :many
@@ -1302,6 +1307,8 @@ RETURNING *;
 WITH victims AS (
     SELECT id FROM agent_task_queue
     WHERE status = 'queued' AND context->>'wakeup_id' IS NULL
+      AND (NOT EXISTS (SELECT 1 FROM agent_runtime r WHERE r.id = agent_task_queue.runtime_id)
+           OR daemon_runtime_admission_open(runtime_id))
       AND created_at < now() - make_interval(secs => @reconnect_grace_secs::double precision)
       AND (
           runtime_id IS NULL
@@ -1364,6 +1371,8 @@ WITH victims AS (
     FROM agent_task_queue retry
     JOIN agent_task_queue parent ON parent.id = retry.parent_task_id
     WHERE retry.status = 'deferred'
+      AND (NOT EXISTS (SELECT 1 FROM agent_runtime r WHERE r.id = retry.runtime_id)
+           OR daemon_runtime_admission_open(retry.runtime_id))
       AND retry.fire_at < now() - make_interval(secs => @reconnect_grace_secs::double precision)
       AND parent.failure_reason = 'runtime_offline'
       AND NOT EXISTS (
@@ -2208,6 +2217,7 @@ WITH due AS (
     FROM agent_task_queue t
     WHERE t.runtime_id = @runtime_id
       AND t.status = 'deferred'
+      AND daemon_runtime_admission_open(t.runtime_id)
       AND t.fire_at <= now()
       AND EXISTS (
         SELECT 1 FROM agent_runtime r
@@ -2275,6 +2285,7 @@ SELECT MIN(fire_at)::timestamptz
 FROM agent_task_queue t
 WHERE t.runtime_id = ANY(@runtime_ids::uuid[])
   AND t.status = 'deferred'
+  AND daemon_runtime_admission_open(t.runtime_id)
   AND EXISTS (
     SELECT 1 FROM agent_runtime r
     WHERE r.id = t.runtime_id
@@ -2311,6 +2322,7 @@ WITH due AS (
     FROM agent_task_queue t
     WHERE t.runtime_id = ANY(@runtime_ids::uuid[])
       AND t.status = 'deferred'
+      AND daemon_runtime_admission_open(t.runtime_id)
       AND t.fire_at <= now()
       AND EXISTS (
         SELECT 1 FROM agent_runtime r

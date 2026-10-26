@@ -1,0 +1,9 @@
+{
+  "contract": "runtime-manager-preview/v1",
+  "manager": "unavailable",
+  "executor": "unavailable",
+  "remote_coverage": "unsupported",
+  "supervisor_launch": "unsupported",
+  "complete_drain": false,
+  "production_transactions": false
+}

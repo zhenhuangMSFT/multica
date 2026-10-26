@@ -666,10 +666,10 @@ type Daemon struct {
 	// and cleared by trySelfReload, read by /health. Diagnostic only.
 	reloadPendingReason atomic.Pointer[string]
 
-	// claimMu guards pauseClaims and claimsInFlight. It is held only for the
-	// microseconds it takes to make a decision; ClaimTask itself runs without
-	// the lock so a slow per-runtime claim cannot stall auto-update or any
-	// other poller.
+	// claimMu guards pauseClaims, claimsInFlight and maintenance. Normal claim
+	// decisions are brief; maintenance holds it across synchronous persistence
+	// so its acknowledgement is ordered with claim rejection. ClaimTask itself
+	// runs without the lock.
 	//
 	// The pair is the auto-update path's barrier against the issue's
 	// requirement that "升级过程中如果有 task 进来，会延后升级而不是中断 task":
@@ -678,9 +678,13 @@ type Daemon struct {
 	// or any task is in handleTask. Together that closes the fetch-then-claim
 	// race where a new task slipping in during the release-metadata fetch
 	// would be cancelled by triggerRestart's root-ctx cancel.
-	claimMu        sync.Mutex
-	pauseClaims    bool // when true, the batch poller skips claiming
-	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
+	claimMu              sync.Mutex
+	pauseClaims          bool                 // when true, the batch poller skips claiming
+	claimsInFlight       int                  // pollers that have decided to claim but haven't yet handed the task off to handleTask
+	maintenance          maintenanceAdmission // guarded by claimMu; independent of the transient update barrier
+	maintenanceControlMu sync.Mutex
+	maintenanceReceipts  *maintenanceReceipts
+	lastMaintenancePoll  time.Time
 
 	activeEnvRootsMu   sync.Mutex
 	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
@@ -2074,6 +2078,9 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 		}
 	}
 	defer healthLn.Close()
+	if err := d.loadMaintenanceAdmission(); err != nil {
+		return fmt.Errorf("load maintenance admission: %w", err)
+	}
 
 	agentNames := make([]string, 0, len(d.agents()))
 	for name := range d.agents() {
@@ -4523,6 +4530,7 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
+	go d.pollMaintenance(ctx, runtimeID)
 	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
@@ -5044,7 +5052,7 @@ func (d *Daemon) tryBeginServerUpdate(ctx context.Context) serverUpdateAcquireRe
 	}
 
 	d.claimMu.Lock()
-	if d.pauseClaims || d.activeTasks.Load() > 0 {
+	if d.pauseClaims || d.maintenance.blocked() || d.activeTasks.Load() > 0 {
 		d.claimMu.Unlock()
 		d.updating.Store(false)
 		return serverUpdateRuntimeBusy
@@ -5158,14 +5166,14 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 }
 
 // tryEnterClaim records the intent to call ClaimTask. Returns true if the
-// caller may proceed, false if the auto-update barrier is in effect. Every
+// caller may proceed, false if update or durable maintenance blocks admission. Every
 // successful call MUST be paired with an exitClaim() on every exit path —
-// either right after a failed/empty claim, or via the handleTask goroutine's
-// defer once the task is handed off.
+// either right after a failed/empty claim, or after activeTasks owns every task
+// handed off by the batch poller.
 func (d *Daemon) tryEnterClaim() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.pauseClaims {
+	if d.pauseClaims || d.maintenance.blocked() {
 		return false
 	}
 	d.claimsInFlight++
@@ -5193,7 +5201,7 @@ func (d *Daemon) trySetClaimBarrier() bool {
 	// double-acquires: two holders both believe they own it, and whichever
 	// finishes first releases it out from under the other. tryBeginServerUpdate
 	// makes the same check for the same reason.
-	if d.pauseClaims || d.claimsInFlight > 0 || d.activeTasks.Load() > 0 {
+	if d.pauseClaims || d.maintenance.blocked() || d.claimsInFlight > 0 || d.activeTasks.Load() > 0 {
 		return false
 	}
 	d.pauseClaims = true

@@ -1,3 +1,12 @@
+-- name: ListDaemonMaintenanceRegistrations :many
+-- Deliberately daemon-wide: narrowing by caller/workspace would hide mixed
+-- ownership in another registration and authorize a machine-wide operation.
+SELECT id, workspace_id, owner_id, daemon_id
+FROM agent_runtime
+WHERE daemon_id = $1
+ORDER BY workspace_id, id
+LIMIT 513;
+
 -- name: ListAgentRuntimes :many
 SELECT * FROM agent_runtime
 WHERE workspace_id = $1
@@ -289,6 +298,7 @@ WITH victims AS (
   FROM agent_task_queue task
   JOIN agent_runtime runtime ON runtime.id = task.runtime_id
   WHERE task.status IN ('dispatched', 'running', 'waiting_local_directory')
+    AND daemon_runtime_admission_open(task.runtime_id)
     AND runtime.status = 'offline'
     AND COALESCE(runtime.last_seen_at, runtime.updated_at) <
         now() - make_interval(secs => @reconnect_grace_secs::double precision)
