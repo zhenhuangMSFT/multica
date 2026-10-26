@@ -811,6 +811,24 @@
     "failed_indicator": "失败"
   },
   "transcript": {
+    "startup": {
+      "title": "启动耗时",
+      "queue": "排队等待",
+      "accepted_to_output": "接受任务至首次输出",
+      "unknown": "未记录",
+      "clock_note": "各阶段为领取任务后的累计耗时。接受时间以任务创建为准，不是浏览器提交时间；首次输出耗时假设时钟同步，且不含界面传输时间。",
+      "phases": {
+        "claimed": "已领取",
+        "prepare_started": "开始准备",
+        "skills_ready": "技能就绪",
+        "environment_ready": "环境就绪",
+        "runtime_started": "模型会话已启动",
+        "first_output_received": "收到首次输出",
+        "first_tool_use": "首次工具调用",
+        "turn_completed": "本轮完成",
+        "finished": "已结束"
+      }
+    },
     "dialog_title": "智能体执行记录",
     "status_running": "进行中",
     "status_completed": "已完成",

@@ -826,6 +826,24 @@
     "failed_indicator": "Failed"
   },
   "transcript": {
+    "startup": {
+      "title": "Startup timing",
+      "queue": "Queue wait",
+      "accepted_to_output": "Accepted to first output",
+      "unknown": "Not recorded",
+      "clock_note": "Phases are elapsed since pickup. Acceptance starts at task creation, not browser submission; first-output timing assumes synchronized clocks and excludes display delivery.",
+      "phases": {
+        "claimed": "Picked up",
+        "prepare_started": "Preparation started",
+        "skills_ready": "Skills ready",
+        "environment_ready": "Environment ready",
+        "runtime_started": "Provider session started",
+        "first_output_received": "First output received",
+        "first_tool_use": "First tool call",
+        "turn_completed": "Turn completed",
+        "finished": "Finished"
+      }
+    },
     "dialog_title": "Agent Execution Transcript",
     "status_running": "Running",
     "status_completed": "Completed",

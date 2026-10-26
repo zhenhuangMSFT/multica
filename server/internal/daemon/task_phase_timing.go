@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type taskPhase string
@@ -40,6 +41,7 @@ type taskPhaseRecorder struct {
 	started  time.Time
 	previous time.Time
 	marked   map[taskPhase]struct{}
+	report   func(protocol.TaskStartupPhase)
 }
 
 func newTaskPhaseRecorder(logger *slog.Logger, now func() time.Time) *taskPhaseRecorder {
@@ -79,6 +81,12 @@ func (r *taskPhaseRecorder) Mark(phase taskPhase) taskPhaseSample {
 	}
 	r.marked[phase] = struct{}{}
 	r.previous = now
+	if r.report != nil {
+		r.report(protocol.TaskStartupPhase{
+			Phase: string(phase), PhaseElapsedMS: sample.PhaseElapsed.Milliseconds(),
+			TotalElapsedMS: sample.TotalElapsed.Milliseconds(), ObservedAt: now.UTC(),
+		})
+	}
 	if r.logger != nil {
 		r.logger.Info("task phase recorded",
 			"task_phase", phase,
@@ -86,6 +94,7 @@ func (r *taskPhaseRecorder) Mark(phase taskPhase) taskPhaseSample {
 			"total_elapsed_ms", sample.TotalElapsed.Milliseconds(),
 		)
 	}
+
 	return sample
 }
 

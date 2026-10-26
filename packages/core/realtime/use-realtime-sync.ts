@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { forgetLocalSearchIndex } from "../search-index/instance";
 import { useQueryClient, type InfiniteData, type QueryClient, type QueryFilters } from "@tanstack/react-query";
 import type { WSClient } from "../api/ws-client";
+import { TaskStartupEventSchema } from "../api/schemas";
 import type { StoreApi, UseBoundStore } from "zustand";
 import type { AuthState } from "../auth/store";
 import { createLogger } from "../logger";
@@ -1069,6 +1070,22 @@ export function useRealtimeSync(
     ]);
 
     const unsubAny = ws.onAny((msg) => {
+      if (msg.type === "task:startup") {
+        const parsed = TaskStartupEventSchema.safeParse(msg.payload);
+        if (!parsed.success) {
+          logger.warn("invalid task:startup event", parsed.error);
+          return;
+        }
+        const wsId = getCurrentWsId();
+        if (!wsId) return;
+        const { task_id, agent_id, issue_id } = parsed.data;
+        debouncedRefresh(`task-startup:${wsId}:${task_id}`, () => {
+          if (getCurrentWsId() !== wsId) return;
+          qc.invalidateQueries({ queryKey: agentTasksKeys.detail(wsId, agent_id) });
+          if (issue_id) qc.invalidateQueries({ queryKey: issueKeys.tasks(issue_id) });
+        });
+        return;
+      }
       if (specificEvents.has(msg.type)) return;
       const prefix = msg.type.split(":")[0] ?? "";
       if (prefix === "agent" || (prefix === "task" && msg.type !== "task:progress")) {

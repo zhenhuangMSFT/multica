@@ -716,6 +716,24 @@
     "failed_indicator": "실패"
   },
   "transcript": {
+    "startup": {
+      "title": "시작 시간",
+      "queue": "대기열 대기",
+      "accepted_to_output": "접수부터 첫 출력까지",
+      "unknown": "기록 없음",
+      "clock_note": "각 단계는 작업 수신 이후의 경과 시간입니다. 접수는 브라우저 제출이 아닌 작업 생성 시점입니다. 첫 출력 시간은 시계 동기화를 전제로 하며 화면 전달 시간은 제외합니다.",
+      "phases": {
+        "claimed": "작업 수신",
+        "prepare_started": "준비 시작",
+        "skills_ready": "스킬 준비 완료",
+        "environment_ready": "환경 준비 완료",
+        "runtime_started": "공급자 세션 시작",
+        "first_output_received": "첫 출력 수신",
+        "first_tool_use": "첫 도구 호출",
+        "turn_completed": "턴 완료",
+        "finished": "종료"
+      }
+    },
     "dialog_title": "에이전트 실행 트랜스크립트",
     "status_running": "실행 중",
     "status_completed": "완료됨",

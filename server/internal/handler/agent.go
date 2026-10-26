@@ -856,7 +856,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		WorkspaceID:            workspaceID,
 		Status:                 t.Status,
 		Priority:               t.Priority,
-		DispatchedAt:           timestampToPtr(t.DispatchedAt),
+		DispatchedAt:           timestampToNanoPtr(t.DispatchedAt),
 		StartedAt:              timestampToPtr(t.StartedAt),
 		CompletedAt:            timestampToPtr(t.CompletedAt),
 		Result:                 result,

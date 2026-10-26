@@ -999,15 +999,18 @@ RETURNING *;
 -- to retire the transcript it retried away from, or an older completed row
 -- pointing at the same id resurrects it on the next run.
 UPDATE agent_task_queue
-SET status = 'completed', completed_at = now(), result = $2,
-    session_id = CASE WHEN sqlc.arg('session_rollout_missing') THEN NULL ELSE $3 END,
-    work_dir = $4,
+SET status = 'completed', completed_at = now(),
+    result = sqlc.arg('result')::jsonb || CASE WHEN result ? 'startup_timing'
+        THEN jsonb_build_object('startup_timing', result -> 'startup_timing')
+        ELSE '{}'::jsonb END,
+    session_id = CASE WHEN sqlc.arg('session_rollout_missing') THEN NULL ELSE sqlc.narg('session_id') END,
+    work_dir = sqlc.narg('work_dir'),
     durable_work_dir = COALESCE(sqlc.narg('durable_work_dir'), durable_work_dir),
     branch_name = COALESCE(sqlc.narg('branch_name'), branch_name),
     session_rollout_missing = sqlc.arg('session_rollout_missing'),
     retired_session_id = COALESCE(sqlc.narg('retired_session_id'), retired_session_id),
     prepare_lease_expires_at = NULL
-WHERE id = $1 AND status = 'running'
+WHERE id = sqlc.arg('id') AND status = 'running'
 RETURNING *;
 
 -- name: GetLastTaskSession :one

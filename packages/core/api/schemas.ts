@@ -2023,6 +2023,31 @@ const TaskUsageSchema = z.object({
   cost_usd_ticks: z.number().optional(),
 }).loose();
 
+export const TASK_STARTUP_PHASES = [
+  "claimed", "prepare_started", "skills_ready", "environment_ready",
+  "runtime_started", "first_output_received", "first_tool_use", "turn_completed", "finished",
+] as const;
+
+export const TaskStartupPhaseSchema = z.object({
+  phase: z.enum(TASK_STARTUP_PHASES),
+  phase_elapsed_ms: z.number().int().nonnegative(),
+  total_elapsed_ms: z.number().int().nonnegative(),
+  observed_at: z.iso.datetime({ offset: true }),
+}).refine((phase) => phase.total_elapsed_ms >= phase.phase_elapsed_ms);
+
+export const TaskStartupTimingResultSchema = z.object({
+  startup_timing: z.object({
+    dispatched_at: z.iso.datetime({ offset: true }),
+    phases: z.record(z.string(), z.unknown()),
+  }),
+});
+
+export const TaskStartupEventSchema = z.object({
+  task_id: z.string().min(1),
+  issue_id: z.string(),
+  agent_id: z.string().min(1),
+});
+
 export const AgentTaskSchema = z.object({
   wakeup_id: z.string().optional().catch(undefined),
   wakeup_snapshot: z.lazy(() => IssueWakeupSummaryRowSchema.omit({

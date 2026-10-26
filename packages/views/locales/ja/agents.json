@@ -708,6 +708,24 @@
     "failed_indicator": "失敗"
   },
   "transcript": {
+    "startup": {
+      "title": "起動時間",
+      "queue": "キュー待機",
+      "accepted_to_output": "受付から最初の出力まで",
+      "unknown": "未記録",
+      "clock_note": "各段階はタスク取得からの経過時間です。受付はブラウザー送信ではなくタスク作成時点です。最初の出力までの時間は時計の同期を前提とし、画面への配信時間を含みません。",
+      "phases": {
+        "claimed": "取得済み",
+        "prepare_started": "準備開始",
+        "skills_ready": "スキル準備完了",
+        "environment_ready": "環境準備完了",
+        "runtime_started": "プロバイダーセッション開始",
+        "first_output_received": "最初の出力を受信",
+        "first_tool_use": "最初のツール呼び出し",
+        "turn_completed": "ターン完了",
+        "finished": "終了"
+      }
+    },
     "dialog_title": "エージェント実行トランスクリプト",
     "status_running": "実行中",
     "status_completed": "完了",
