@@ -79,6 +79,7 @@ import {
 } from "./build-steps";
 import { buildRunOutcome } from "./run-outcome";
 import { RunTimeline } from "./run-timeline";
+import { StartupTimingRow } from "./startup-timing-row";
 import {
   base64ByteLength,
   readImageResult,
@@ -951,7 +952,7 @@ export function AgentTranscriptDialog({
                   >
                     <Info className="h-3.5 w-3.5" />
                   </PopoverTrigger>
-                  <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)] p-3">
+                  <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)] max-h-[min(24rem,var(--available-height))] overflow-y-auto p-3">
                     <div className="mb-2 text-caption font-medium text-foreground">
                       {t(($) => $.transcript.run_info)}
                     </div>
@@ -1069,6 +1070,7 @@ export function AgentTranscriptDialog({
                         </>
                       )}
                     </div>
+                    <StartupTimingRow task={task} />
                   </PopoverContent>
                 </Popover>
               )}
@@ -1877,4 +1879,3 @@ function readPathFromInput(input: Record<string, unknown> | undefined): string |
   const path = input.file_path ?? input.path;
   return typeof path === "string" ? path : undefined;
 }
-

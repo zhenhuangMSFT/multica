@@ -1946,27 +1946,30 @@ func (q *Queries) ClearAgentThinkingLevel(ctx context.Context, id pgtype.UUID) (
 
 const completeAgentTask = `-- name: CompleteAgentTask :one
 UPDATE agent_task_queue
-SET status = 'completed', completed_at = now(), result = $2,
-    session_id = CASE WHEN $5 THEN NULL ELSE $3 END,
+SET status = 'completed', completed_at = now(),
+    result = $1::jsonb || CASE WHEN result ? 'startup_timing'
+        THEN jsonb_build_object('startup_timing', result -> 'startup_timing')
+        ELSE '{}'::jsonb END,
+    session_id = CASE WHEN $2 THEN NULL ELSE $3 END,
     work_dir = $4,
-    durable_work_dir = COALESCE($6, durable_work_dir),
-    branch_name = COALESCE($7, branch_name),
-    session_rollout_missing = $5,
-    retired_session_id = COALESCE($8, retired_session_id),
+    durable_work_dir = COALESCE($5, durable_work_dir),
+    branch_name = COALESCE($6, branch_name),
+    session_rollout_missing = $2,
+    retired_session_id = COALESCE($7, retired_session_id),
     prepare_lease_expires_at = NULL
-WHERE id = $1 AND status = 'running'
+WHERE id = $8 AND status = 'running'
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
 `
 
 type CompleteAgentTaskParams struct {
-	ID                    pgtype.UUID `json:"id"`
 	Result                []byte      `json:"result"`
+	SessionRolloutMissing bool        `json:"session_rollout_missing"`
 	SessionID             pgtype.Text `json:"session_id"`
 	WorkDir               pgtype.Text `json:"work_dir"`
-	SessionRolloutMissing bool        `json:"session_rollout_missing"`
 	DurableWorkDir        pgtype.Text `json:"durable_work_dir"`
 	BranchName            pgtype.Text `json:"branch_name"`
 	RetiredSessionID      pgtype.Text `json:"retired_session_id"`
+	ID                    pgtype.UUID `json:"id"`
 }
 
 // session_rollout_missing (MUL-5305): when true the daemon withheld this task's
@@ -1982,14 +1985,14 @@ type CompleteAgentTaskParams struct {
 // pointing at the same id resurrects it on the next run.
 func (q *Queries) CompleteAgentTask(ctx context.Context, arg CompleteAgentTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, completeAgentTask,
-		arg.ID,
 		arg.Result,
+		arg.SessionRolloutMissing,
 		arg.SessionID,
 		arg.WorkDir,
-		arg.SessionRolloutMissing,
 		arg.DurableWorkDir,
 		arg.BranchName,
 		arg.RetiredSessionID,
+		arg.ID,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(

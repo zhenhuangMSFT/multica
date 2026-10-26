@@ -438,6 +438,8 @@ type Daemon struct {
 	skillCache *SkillBundleCache
 	logger     *slog.Logger
 
+	startupReporter *taskStartupReporter
+
 	// terminalReports is the durable outbox for complete/fail callbacks. The
 	// sender hook is production-wired through Client and overridable in focused
 	// tests; terminalReportWakeup coalesces new-report and reconnect nudges.
@@ -5300,6 +5302,8 @@ func (d *Daemon) restartTargetBinary() (string, error) {
 // per-request timeout (WS) / the client's timeout (HTTP fallback), and the
 // server-side batch claim is index-backed + short.
 func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) error {
+	d.startupReporter = newTaskStartupReporter(d.client, d.logger)
+	defer d.startupReporter.close()
 	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
 	var taskWG sync.WaitGroup // tracks in-flight handleTask goroutines
 
@@ -5706,6 +5710,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// tasks routinely share one (#7326).
 	taskLog := d.logger.With("task", task.ID)
 	phaseRecorder := newTaskPhaseRecorder(taskLog.With("task_id", task.ID, "runtime_id", task.RuntimeID), time.Now)
+	phaseRecorder.startReporting(d.startupReporter, task)
 	ctx = withTaskPhaseRecorder(ctx, phaseRecorder)
 	phaseRecorder.Mark(taskPhaseClaimed)
 	defer phaseRecorder.Mark(taskPhaseFinished)

@@ -826,6 +826,24 @@
     "failed_indicator": "En échec"
   },
   "transcript": {
+    "startup": {
+      "title": "Temps de démarrage",
+      "queue": "Attente en file",
+      "accepted_to_output": "Acceptation à la première sortie",
+      "unknown": "Non enregistré",
+      "clock_note": "Les phases indiquent le temps depuis la prise en charge. L’acceptation correspond à la création de la tâche, pas à l’envoi du navigateur. Le délai de première sortie suppose des horloges synchronisées et exclut la livraison à l’écran.",
+      "phases": {
+        "claimed": "Prise en charge",
+        "prepare_started": "Préparation commencée",
+        "skills_ready": "Compétences prêtes",
+        "environment_ready": "Environnement prêt",
+        "runtime_started": "Session fournisseur démarrée",
+        "first_output_received": "Première sortie reçue",
+        "first_tool_use": "Premier appel d’outil",
+        "turn_completed": "Tour terminé",
+        "finished": "Terminé"
+      }
+    },
     "dialog_title": "Transcription d'exécution de l'agent",
     "status_running": "En cours",
     "status_completed": "Terminée",

@@ -10,7 +10,7 @@ import { defaultStorage } from "../platform/storage";
 import { issueKeys } from "../issues/queries";
 import { chatKeys } from "../chat/queries";
 import { runtimeKeys } from "../runtimes/queries";
-import { workspaceWorkingAgentsKeys } from "../agents/queries";
+import { agentTasksKeys, workspaceWorkingAgentsKeys } from "../agents/queries";
 import { workspaceKeys } from "../workspace/queries";
 import { issueStatusKeys } from "../issue-statuses/queries";
 import { issueWorkflowKeys } from "../issue-workflows/queries";
@@ -96,6 +96,73 @@ describe("useRealtimeSync — ws instance change", () => {
     // Simpler: count calls — first mount with a ws should not trigger the
     // workspace-scoped bulk invalidation.
     expect(invalidateSpy).not.toHaveBeenCalled();
+  });
+
+  it("coalesces startup reports without refreshing presence or activity projections", () => {
+    vi.useFakeTimers();
+    try {
+      const ws = createMockWs();
+      renderHook(() => useRealtimeSync(ws, stores), { wrapper: createWrapper(qc) });
+      const onAny = vi.mocked(ws.onAny).mock.calls[0]![0];
+      for (let i = 0; i < 9; i++) {
+        onAny({ type: "task:startup", payload: { task_id: "task-1", issue_id: "issue-1", agent_id: "agent-1" } });
+      }
+      vi.advanceTimersByTime(100);
+      expect(invalidateSpy).toHaveBeenCalledTimes(2);
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: agentTasksKeys.detail("ws-1", "agent-1") });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueKeys.tasks("issue-1") });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("targets each task separately across concurrent and spaced startup reports", () => {
+    vi.useFakeTimers();
+    try {
+      const ws = createMockWs();
+      renderHook(() => useRealtimeSync(ws, stores), { wrapper: createWrapper(qc) });
+      const onAny = vi.mocked(ws.onAny).mock.calls[0]![0];
+      for (const suffix of ["1", "2"]) {
+        onAny({ type: "task:startup", payload: {
+          task_id: `task-${suffix}`, issue_id: `issue-${suffix}`, agent_id: `agent-${suffix}`,
+        } });
+      }
+      vi.advanceTimersByTime(101);
+      expect(invalidateSpy).toHaveBeenCalledTimes(4);
+      for (const suffix of ["1", "2"]) {
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: agentTasksKeys.detail("ws-1", `agent-${suffix}`) });
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueKeys.tasks(`issue-${suffix}`) });
+      }
+      invalidateSpy.mockClear();
+      onAny({ type: "task:startup", payload: { task_id: "task-1", issue_id: "issue-1", agent_id: "agent-1" } });
+      vi.advanceTimersByTime(101);
+      expect(invalidateSpy).toHaveBeenCalledTimes(2);
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: agentTasksKeys.detail("ws-1", "agent-1") });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueKeys.tasks("issue-1") });
+      invalidateSpy.mockClear();
+      onAny({ type: "task:startup", payload: { task_id: "chat-task", issue_id: "", agent_id: "agent-2" } });
+      vi.advanceTimersByTime(101);
+      expect(invalidateSpy).toHaveBeenCalledTimes(1);
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: agentTasksKeys.detail("ws-1", "agent-2") });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects malformed startup events without invalidating histories", () => {
+    vi.useFakeTimers();
+    try {
+      const ws = createMockWs();
+      renderHook(() => useRealtimeSync(ws, stores), { wrapper: createWrapper(qc) });
+      const onAny = vi.mocked(ws.onAny).mock.calls[0]![0];
+      for (const payload of [null, {}, { task_id: "task-1", issue_id: "issue-1" }]) {
+        onAny({ type: "task:startup", payload });
+      }
+      vi.advanceTimersByTime(101);
+      expect(invalidateSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not invalidate when ws goes from instance to null", () => {

@@ -307,6 +307,44 @@ You need at least one installed. The daemon registers each detected CLI as an av
 4. Heartbeats are sent periodically (default: 15s) so the server knows the daemon is alive
 5. On shutdown, all runtimes are deregistered
 
+### Startup timing
+
+Issue and agent run details include a **Startup timing** disclosure inside the
+scrollable **Run details** popover, so expanding diagnostics does not reduce the
+transcript viewport. Queue wait
+measures server task creation to dispatch. Accepted-to-first-output measures task
+creation to the daemon's first nonempty text/thinking, tool event, or error; it is
+approximate because the server and daemon clocks must be synchronized. It is not
+browser submission-to-display latency, and does not separately measure follow-ups
+coalesced into an existing task. Missing observations show **Not recorded**, not zero.
+
+The daemon reports `claimed`, `prepare_started`, `skills_ready`,
+`environment_ready`, `runtime_started`, `first_output_received`, `first_tool_use`,
+`turn_completed`, and `finished`. Displayed phase times are cumulative since
+pickup; `phase_elapsed_ms` in diagnostic data is the interval since the previous
+recorded phase, not the duration of the named operation. `runtime_started` means
+the runtime session was created, not that the model is ready.
+
+`POST /api/daemon/tasks/{taskId}/startup` uses existing daemon task authorization
+and accepts `{ "dispatched_at": "<claim timestamp>", "phase": {
+"phase": "<name>", "phase_elapsed_ms": 0, "total_elapsed_ms": 0,
+"observed_at": "<RFC3339 timestamp>" } }`. The exact dispatch timestamp fences
+stale claims. Additive samples are stored in `result.startup_timing`, keyed by
+phase; duplicates retain the first observation and task completion preserves the
+metadata. No database migration is required. Startup events refresh run details
+without adding transcript messages or changing cancellation semantics.
+
+Reporting is diagnostic-only: one daemon-owned worker drains a bounded 256-sample
+queue, independently of execution slots. Task completion never waits for
+diagnostic HTTP requests. At daemon shutdown, reporting has a five-second total
+flush budget. Overflow or shutdown drops are logged; failed requests are not
+retried. Startup events refresh only the affected issue and agent run histories,
+coalesced per task. API dispatch timestamps preserve claim microseconds. Older servers reject the
+endpoint and older daemons do not report phases, leaving those values unrecorded.
+Both server and daemon updates, plus updated web/desktop assets, are required for
+full visibility. This instrumentation does not change pickup polling or reduce
+provider startup latency.
+
 ### Configuration
 
 Daemon behavior is configured via flags or environment variables:

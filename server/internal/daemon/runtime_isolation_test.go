@@ -248,7 +248,7 @@ func TestTaskClaimPollIntervalTracksWSRPCAvailability(t *testing.T) {
 // queued for the full default 30 seconds.
 func TestRunBatchPollerWakesAfterTaskExit(t *testing.T) {
 	t.Parallel()
-	testRunBatchPollerTaskExitWakeup(t, 2, 50*time.Millisecond)
+	testRunBatchPollerTaskExitWakeup(t, 2, 50*time.Millisecond, false)
 }
 
 // The max-concurrency=1 shape takes a different sleep branch: after the
@@ -257,10 +257,14 @@ func TestRunBatchPollerWakesAfterTaskExit(t *testing.T) {
 // explicit completion signal is required there too.
 func TestRunBatchPollerWakesFromCapacityBackoffAfterTaskExit(t *testing.T) {
 	t.Parallel()
-	testRunBatchPollerTaskExitWakeup(t, 1, 200*time.Millisecond)
+	testRunBatchPollerTaskExitWakeup(t, 1, 200*time.Millisecond, false)
 }
 
-func testRunBatchPollerTaskExitWakeup(t *testing.T, maxConcurrent int, releaseDelay time.Duration) {
+func TestRunBatchPollerReleasesSlotWhileStartupReportingStalls(t *testing.T) {
+	testRunBatchPollerTaskExitWakeup(t, 1, 0, true)
+}
+
+func testRunBatchPollerTaskExitWakeup(t *testing.T, maxConcurrent int, releaseDelay time.Duration, stallStartup bool) {
 	t.Helper()
 
 	var firstCompleted atomic.Bool
@@ -269,17 +273,26 @@ func testRunBatchPollerTaskExitWakeup(t *testing.T, maxConcurrent int, releaseDe
 	firstStarted := make(chan struct{})
 	releaseFirst := make(chan struct{})
 	secondStarted := make(chan struct{})
+	startupEntered := make(chan struct{}, 1)
+	releaseStartup := make(chan struct{})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/startup") && stallStartup:
+			select {
+			case startupEntered <- struct{}{}:
+			default:
+			}
+			<-releaseStartup
+			w.Write([]byte(`{}`))
 		case strings.HasSuffix(r.URL.Path, "/api/daemon/tasks/claim"):
 			claimCalls.Add(1)
 			switch {
 			case !firstCompleted.Load():
-				w.Write([]byte(`{"tasks":[{"id":"t1","runtime_id":"rt-1","issue_id":"i1","agent":{"name":"a"}}]}`))
+				w.Write([]byte(`{"tasks":[{"id":"t1","runtime_id":"rt-1","issue_id":"i1","dispatched_at":"2026-10-26T00:00:00.123456Z","agent":{"name":"a"}}]}`))
 			case secondServed.CompareAndSwap(false, true):
-				w.Write([]byte(`{"tasks":[{"id":"t2","runtime_id":"rt-1","issue_id":"i1","agent":{"name":"a"}}]}`))
+				w.Write([]byte(`{"tasks":[{"id":"t2","runtime_id":"rt-1","issue_id":"i1","dispatched_at":"2026-10-26T00:00:01.123456Z","agent":{"name":"a"}}]}`))
 			default:
 				w.Write([]byte(`{"tasks":[]}`))
 			}
@@ -301,6 +314,9 @@ func testRunBatchPollerTaskExitWakeup(t *testing.T, maxConcurrent int, releaseDe
 	d.workspaces["ws-1"] = &workspaceState{workspaceID: "ws-1", runtimeIDs: []string{"rt-1"}}
 	d.runtimeIndex["rt-1"] = Runtime{ID: "rt-1"}
 	d.cancelPollInterval = time.Hour
+	d.startupReporter = newTaskStartupReporter(d.client, d.logger)
+	defer d.startupReporter.close()
+	defer close(releaseStartup)
 	d.taskSlotWait = 50 * time.Millisecond
 	d.runner = taskRunnerFunc(func(ctx context.Context, task Task, provider string, slot int, log *slog.Logger) (TaskResult, error) {
 		switch task.ID {
@@ -333,6 +349,15 @@ func testRunBatchPollerTaskExitWakeup(t *testing.T, maxConcurrent int, releaseDe
 		cancel()
 		<-pollDone
 		t.Fatal("first task was not dispatched")
+	}
+	if stallStartup {
+		select {
+		case <-startupEntered:
+		case <-time.After(2 * time.Second):
+			cancel()
+			<-pollDone
+			t.Fatal("startup endpoint was not reached")
+		}
 	}
 
 	// Give the poller time to enter the sleep branch under test. No websocket

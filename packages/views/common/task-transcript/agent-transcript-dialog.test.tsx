@@ -249,6 +249,17 @@ afterEach(() => {
 });
 
 describe("AgentTranscriptDialog", () => {
+  it("keeps expanded startup diagnostics in the scrollable run-details popover", async () => {
+    renderDialog(items);
+    expect(screen.queryByText("Startup timing")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Run details" }));
+    const summary = screen.getByText("Startup timing");
+    const popup = summary.closest('[data-slot="popover-content"]');
+    expect(popup).toHaveClass("overflow-y-auto", "max-h-[min(24rem,var(--available-height))]");
+    await userEvent.click(summary);
+    expect(screen.getByText("Queue wait")).toBeVisible();
+    expect(screen.getAllByText(/Agent summary/).length).toBeGreaterThan(0);
+  });
   it.each([
     { type: "text", label: "Agent", icon: ".lucide-bot" },
     { type: "thinking", label: "Thinking", icon: ".lucide-brain" },
